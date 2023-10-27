@@ -1,0 +1,11 @@
+{
+    "127.0.0.1": [
+      "ip.vizinho.1",
+      "ip.vizinho.2"
+    ],
+
+    "node2": [
+        "ip.vizinho.1",
+        "ip.vizinho.2"
+    ]
+}
