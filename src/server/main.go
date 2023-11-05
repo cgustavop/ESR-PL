@@ -7,8 +7,15 @@ import (
 )
 
 func main() {
-	// abrir a socket para receber pedidos
-	listener, erro := net.Listen("tcp", "localhost:8080")
+	// abrir a socket UDP para receber pedidos
+	udpAddr, err := net.ResolveUDPAddr("udp", "localhost:8080")
+
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	listener, erro := net.ListenUDP("udp", udpAddr)
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
@@ -17,37 +24,24 @@ func main() {
 
 	fmt.Println("Server is listening on port 8080")
 
-	// loop para receber pedidos
 	for {
-		// aceitar um pedido recebido na socket
-		conn, err := listener.Accept()
+		var buf [512]byte
+		msg, addr, err := listener.ReadFromUDP(buf[0:])
 		if err != nil {
-			fmt.Println("Error:", err)
-			continue
+			fmt.Println(err)
+			return
 		}
 
-		// Handle client connection in a goroutine
-		go handleRequest(conn)
+		filePath := string(buf[:msg])
+
+		go handleRequest(listener, addr, filePath) // go X arranca uma nova thread que executa a função X
+		// Write back the message over UPD
+
 	}
 }
 
-func handleRequest(conn net.Conn) {
-	response := make([]byte, 4096)
-	n, err := conn.Read(response)
-	if err != nil {
-		fmt.Println("Error reading response:", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Client said: %s\n", response[:n])
-
-	data := []byte("ok")
-	_, err = conn.Write(data)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-
-	defer conn.Close()
-
+func handleRequest(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
+	fmt.Printf("Request for %s from %s\n", filePath, client.IP.String())
+	data := []byte("ACK")
+	conn.WriteToUDP(data, client)
 }

@@ -9,7 +9,8 @@ import (
 func main() {
 	// abrir a socket para receber pedidos
 	adr := "localhost:8080"
-	listener, erro := net.Dial("tcp", adr)
+	udpAddr, err := net.ResolveUDPAddr("udp", adr)
+	listener, erro := net.DialUDP("udp", nil, udpAddr)
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
@@ -32,7 +33,6 @@ func main() {
 	fmt.Printf("Server said: %s\n", response[:n])
 
 	fmt.Printf("Closing connection...\n")
-	defer listener.Close()
 }
 
 func mandaCenas(conn net.Conn) {

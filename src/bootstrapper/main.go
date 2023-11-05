@@ -11,8 +11,14 @@ var tree map[string][]string
 
 func main() {
 	loadTree()
+	udpAddr, err := net.ResolveUDPAddr("udp", "localhost:8080")
 
-	listener, erro := net.Listen("tcp", "localhost:8080")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	listener, erro := net.ListenUDP("udp", udpAddr)
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
@@ -22,13 +28,16 @@ func main() {
 	fmt.Println("Server is listening on port 8080")
 
 	for {
-		client, err := listener.Accept()
+		var buf [512]byte
+		_, addr, err := listener.ReadFromUDP(buf[0:])
 		if err != nil {
-			fmt.Println("Error:", err)
-			continue
+			fmt.Println(err)
+			return
 		}
 
-		go handleRequest(client) // go arranca numa nova thread
+		go handleRequest(listener, addr) // go X arranca uma nova thread que executa a função X
+		// Write back the message over UPD
+
 	}
 }
 
@@ -56,29 +65,21 @@ func loadTree() {
 	}
 }
 
-func getNeighbours(key string) ([]string, error) {
-	ip, _, _ := net.SplitHostPort(key)
+func getNeighbours(ip string) ([]string, error) {
 	fmt.Printf("Request from %s\n", ip)
 
 	value, found := tree[ip]
 	if !found {
-		return []string{}, fmt.Errorf("Key not found in the map: %s", key)
+		return []string{}, fmt.Errorf("Key not found in the map: %s", ip)
 	}
 	return value, nil
 }
 
-func handleRequest(client net.Conn) {
-	var addr string = client.RemoteAddr().String()
-	neighboursArray, err := getNeighbours(addr)
+func handleRequest(conn *net.UDPConn, client *net.UDPAddr) {
+	neighboursArray, _ := getNeighbours(client.IP.String())
 
 	arrayStr := fmt.Sprintf("%v", neighboursArray)
 	data := []byte(arrayStr)
 
-	_, err = client.Write(data)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-
-	defer client.Close()
+	conn.WriteToUDP(data, client)
 }
