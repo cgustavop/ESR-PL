@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"server/unicast"
 )
 
 func main() {
@@ -33,8 +34,9 @@ func main() {
 		}
 
 		filePath := string(buf[:msg])
+		fp := fmt.Sprintf("./files/%s", filePath)
 
-		go handleRequest(listener, addr, filePath) // go X arranca uma nova thread que executa a função X
+		go handleRequest(listener, addr, fp) // go X arranca uma nova thread que executa a função X
 		// Write back the message over UPD
 
 	}
@@ -42,6 +44,7 @@ func main() {
 
 func handleRequest(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
 	fmt.Printf("Request for %s from %s\n", filePath, client.IP.String())
-	data := []byte("ACK")
-	conn.WriteToUDP(data, client)
+	//data := []byte("ACK")
+	//conn.WriteToUDP(data, client)
+	unicast.SendFile(conn, client, filePath)
 }
