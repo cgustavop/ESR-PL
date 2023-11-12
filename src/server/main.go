@@ -32,11 +32,10 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-
 		filePath := string(buf[:msg])
 		fp := fmt.Sprintf("./files/%s", filePath)
 
-		go handleRequest(listener, addr, fp) // go X arranca uma nova thread que executa a função X
+		handleRequest(listener, addr, fp) // go X arranca uma nova thread que executa a função X
 		// Write back the message over UPD
 
 	}

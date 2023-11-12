@@ -45,14 +45,54 @@ func SendFile(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
 			break
 		}
 
-		// Send the chunk over UDP
-		_, err = conn.Write(buffer[:n])
-		if err != nil {
-			fmt.Println("Error sending data:", err)
+		chunk := buffer[:n]
+
+		if n < bufSize {
+			sendChunk(conn, client, chunk)
+			sendEOF(conn, client)
+			checkEOF(conn, client)
+			fmt.Println("File sent successfully.")
 			return
 		}
+		fmt.Println("huh.")
+		sendChunk(conn, client, chunk)
+		checkACK(conn, client)
+
 	}
 
-	fmt.Println("File sent successfully.")
+}
 
+// Send the chunk over UDP
+func sendChunk(conn *net.UDPConn, client *net.UDPAddr, chunk []byte) {
+	_, err := conn.WriteToUDP(chunk, client)
+	if err != nil {
+		fmt.Println("Error sending chunk:", err)
+		return
+	}
+}
+
+func checkACK(conn *net.UDPConn, clien *net.UDPAddr) {
+	var buf [1024]byte
+	msg, _, err := conn.ReadFromUDP(buf[0:])
+	ackMsg := string(buf[:msg])
+	if err != nil || ackMsg != "ACK" {
+		fmt.Println(err)
+		return
+	}
+}
+
+// EOF signal
+func sendEOF(conn *net.UDPConn, client *net.UDPAddr) {
+	eof := []byte("EOF")
+	conn.WriteToUDP(eof, client)
+}
+
+func checkEOF(conn *net.UDPConn, clien *net.UDPAddr) {
+	var buf [1024]byte
+	msg, _, err := conn.ReadFromUDP(buf[0:])
+	eofMsg := string(buf[:msg])
+	if err != nil || eofMsg != "EOF" {
+		fmt.Println(err)
+		return
+	}
 }
