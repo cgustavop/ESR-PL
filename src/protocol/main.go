@@ -5,6 +5,20 @@ import (
 	"os"
 )
 
+type protocol struct {
+	name    string
+	block   int
+	aspectL int
+	aspectR int
+	fps     int
+	content []byte
+}
+
+func newProtocol(name string, block int, aspectL int, aspectR int, fps int, content []byte) *protocol {
+	p := protocol{name: name, block: block, aspectL: aspectL, aspectR: aspectR, fps: fps, content: content}
+	return &p
+}
+
 const BUFSIZE = 1024 * 8
 
 // Adapted from https://github.com/rb-de0/go-mp4-stream
