@@ -21,11 +21,11 @@ func SendFile(conn net.Conn, filePath string) (int, *net.UDPConn) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
-		return 0, nil
+		return -1, nil
 	}
 
 	// Set buffer size
-	bufSize := 1024
+	bufSize := 1472
 	buffer := make([]byte, bufSize)
 	chunkCount := 0
 

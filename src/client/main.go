@@ -42,7 +42,6 @@ func main() {
 	}
 
 	fmt.Println("Closing connection...")
-	defer listener.Close()
 }
 
 func requestFile(conn net.Conn, filePath string) {
@@ -105,7 +104,7 @@ func receivePackets(listener *net.UDPConn, filePath string, packetChan chan stru
 	fmt.Println("Ready for file transfer")
 
 	// Set buffer size
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 1472)
 
 	// Loop to receive and write packets to the file
 	for {

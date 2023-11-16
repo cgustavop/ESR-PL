@@ -44,6 +44,13 @@ func handleRequest(conn net.Conn) {
 
 	filePath := fmt.Sprintf("./files/%s", response[:msg])
 
+	_, err = os.Stat(filePath)
+	if err != nil {
+		fmt.Println("Requested file does not exist")
+		sendMsg(conn, "404")
+		return
+	}
+
 	fmt.Printf("Request for %s from %s\n", filePath, conn.RemoteAddr().String())
 
 	// ready to send file
