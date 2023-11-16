@@ -1,21 +1,18 @@
 package main
 
 import (
+	"esr/server/unicast"
 	"fmt"
 	"net"
 	"os"
 )
 
 func main() {
-	// abrir a socket UDP para receber pedidos
-	udpAddr, err := net.ResolveUDPAddr("udp", "localhost:8080")
 
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	// o server deve mandar um pedido ao bootstrapper para conhecer o RP
+	// apenas deve aceitar conexões do RP
 
-	listener, erro := net.ListenUDP("udp", udpAddr)
+	listener, erro := net.Listen("tcp", "localhost:8080")
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
@@ -25,23 +22,63 @@ func main() {
 	fmt.Println("Server is listening on port 8080")
 
 	for {
-		var buf [512]byte
-		msg, addr, err := listener.ReadFromUDP(buf[0:])
+		client, err := listener.Accept()
 		if err != nil {
-			fmt.Println(err)
-			return
+			fmt.Println("Error:", err)
+			continue
 		}
 
-		filePath := string(buf[:msg])
-
-		go handleRequest(listener, addr, filePath) // go X arranca uma nova thread que executa a função X
-		// Write back the message over UPD
-
+		go handleRequest(client)
 	}
+
 }
 
-func handleRequest(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
-	fmt.Printf("Request for %s from %s\n", filePath, client.IP.String())
-	data := []byte("ACK")
-	conn.WriteToUDP(data, client)
+func handleRequest(conn net.Conn) {
+
+	response := make([]byte, 4096)
+	msg, err := conn.Read(response)
+	if err != nil {
+		fmt.Println("Error reading response:", err)
+		os.Exit(1)
+	}
+
+	filePath := fmt.Sprintf("./files/%s", response[:msg])
+
+	_, err = os.Stat(filePath)
+	if err != nil {
+		fmt.Println("Requested file does not exist")
+		sendMsg(conn, "404")
+		return
+	}
+
+	fmt.Printf("Request for %s from %s\n", filePath, conn.RemoteAddr().String())
+
+	// ready to send file
+	sendMsg(conn, "GO")
+	packetsSent, UDPconn := unicast.SendFile(conn, filePath)
+	fmt.Println("Ended transfer")
+	sendMsg(conn, "EOF")
+
+	//listen for number of packets received
+	response = make([]byte, 4096)
+	msg, err = conn.Read(response)
+	if err != nil {
+		fmt.Println("Error reading response:", err)
+		os.Exit(1)
+	}
+
+	UDPconn.Close()
+
+	fmt.Println("Packets sent:", packetsSent)
+	packetsReceived := fmt.Sprintf("%s", response[:msg])
+	fmt.Printf("The client received %s packets\n", packetsReceived)
+}
+
+func sendMsg(conn net.Conn, msg string) {
+	data := []byte(msg)
+	_, err := conn.Write(data)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
 }
