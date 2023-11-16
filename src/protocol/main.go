@@ -7,6 +7,7 @@ import (
 
 const BUFSIZE = 1024 * 8
 
+// Adapted from https://github.com/rb-de0/go-mp4-stream
 func streamRequest(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
 	file, err := os.Open(filePath)
 
