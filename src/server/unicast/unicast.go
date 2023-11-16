@@ -6,36 +6,28 @@ import (
 	"os"
 )
 
-// recebe um path
-// packetization do ficheiro io.Read
-// enviar pacote
-// garantir que recebeu (esperar ACK)
-// retransmissão se perdeu pacotes ou se deu timeout (conta retransmissões)
-// enviar restantes
-// end of trasmission (EOT)
+func SendFile(conn net.Conn, filePath string) (int, *net.UDPConn) {
 
-// DO OUTRO LADO
-// receber pacotes (apontar ordem) é EOT ou packet
-// mandar ACK -> número do pacote que recebeu
-// reassembly
-
-func SendFile(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
-	//fmt.Printf("Request for %s from %s\n", filePath, client.IP.String())
-	//data := []byte("ACK")
-	//conn.WriteToUDP(data, client)
-	//	io.Read()
-
+	// connect to client using UDP
+	addr, err := net.ResolveUDPAddr("udp", conn.RemoteAddr().String())
+	addr.Port = 8081
+	listener, erro := net.DialUDP("udp", nil, addr)
+	if erro != nil {
+		fmt.Println("Error:", erro)
+		return 0, nil
+	}
+	fmt.Println("Connected at ", addr)
 	// Open the file
 	file, err := os.Open(filePath)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
-		return
+		return 0, nil
 	}
-	defer file.Close()
 
 	// Set buffer size
 	bufSize := 1024
 	buffer := make([]byte, bufSize)
+	chunkCount := 0
 
 	// Read and send the file in chunks
 	for {
@@ -47,52 +39,15 @@ func SendFile(conn *net.UDPConn, client *net.UDPAddr, filePath string) {
 
 		chunk := buffer[:n]
 
-		if n < bufSize {
-			sendChunk(conn, client, chunk)
-			sendEOF(conn, client)
-			checkEOF(conn, client)
-			fmt.Println("File sent successfully.")
-			return
+		_, err = listener.Write(chunk)
+		if err != nil {
+			fmt.Println("Error sending chunk:", err)
+			return 0, nil
 		}
-		fmt.Println("huh.")
-		sendChunk(conn, client, chunk)
-		checkACK(conn, client)
-
+		chunkCount++
 	}
 
-}
+	file.Close()
 
-// Send the chunk over UDP
-func sendChunk(conn *net.UDPConn, client *net.UDPAddr, chunk []byte) {
-	_, err := conn.WriteToUDP(chunk, client)
-	if err != nil {
-		fmt.Println("Error sending chunk:", err)
-		return
-	}
-}
-
-func checkACK(conn *net.UDPConn, clien *net.UDPAddr) {
-	var buf [1024]byte
-	msg, _, err := conn.ReadFromUDP(buf[0:])
-	ackMsg := string(buf[:msg])
-	if err != nil || ackMsg != "ACK" {
-		fmt.Println(err)
-		return
-	}
-}
-
-// EOF signal
-func sendEOF(conn *net.UDPConn, client *net.UDPAddr) {
-	eof := []byte("EOF")
-	conn.WriteToUDP(eof, client)
-}
-
-func checkEOF(conn *net.UDPConn, clien *net.UDPAddr) {
-	var buf [1024]byte
-	msg, _, err := conn.ReadFromUDP(buf[0:])
-	eofMsg := string(buf[:msg])
-	if err != nil || eofMsg != "EOF" {
-		fmt.Println(err)
-		return
-	}
+	return chunkCount, listener
 }
