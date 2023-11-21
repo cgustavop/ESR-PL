@@ -7,6 +7,10 @@ import (
 	"os"
 )
 
+// vizinhos
+// streams
+//
+
 func main() {
 
 	// o server deve mandar um pedido ao bootstrapper para conhecer o RP

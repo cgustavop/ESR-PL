@@ -1,4 +1,4 @@
-package main
+package bootstrapper
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 
 var tree map[string][]string
 
-func main() {
+func Run() {
 	loadTree()
 	udpAddr, err := net.ResolveUDPAddr("udp", "localhost:8080")
 
