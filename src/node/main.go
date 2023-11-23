@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/gob"
 	"esr/node/bootstrapper"
 	"flag"
 	"fmt"
@@ -18,16 +19,26 @@ gestor de vizinhos
 	map[ip_vizinho string]bool on
 faz pedido de stream
 video stream player
-
-
--
-
 */
 
+var rpFlag bool
+
+type neighbour struct {
+	flag    int
+	latency int
+	loss    int
+}
+
+var neighboursTable map[string]neighbour
+
+// hard-coded
+var bootrapperAddr string = "localhost:8080"
+
 func main() {
+	neighboursTable = make(map[string]neighbour)
 
 	bsFlag := flag.Bool("bs", false, "sets the node as the overlay's Bootstrapper")
-	rpFlag := flag.Bool("rp", false, "sets the node as the overlay's Rendezvous Point")
+	flag.BoolVar(&rpFlag, "rp", false, "sets the node as the overlay's Rendezvous Point")
 	//filePath := flag.String("stream", "", "requests a stream for the given file")
 
 	var filePath string
@@ -37,48 +48,78 @@ func main() {
 	flag.Parse()
 
 	if *bsFlag {
+		// corre bootstrapper em segundo plano
 		go bootstrapper.Run()
 	}
-	if *rpFlag {
-		// go runRP()
-	}
-	if filePath != "" {
-		// go requestStream()
-	}
 
-	// abrir a socket para receber pedidos
-	adr := "localhost:8080"
-	listener, erro := net.Dial("tcp", adr)
+	// faz pedido ao bootstrapper e guarda vizinhos
+	setup()
+
+	select {}
+	/*
+		if filePath != "" {
+			// go requestStream(filePath)
+		}
+
+		listener, erro := net.Listen("tcp", "localhost:8081")
+		if erro != nil {
+			fmt.Println("Error:", erro)
+			return
+		}
+		defer listener.Close()
+
+		fmt.Println("Server is listening on port 8080")
+
+		for {
+			client, err := listener.Accept()
+			if err != nil {
+				fmt.Println("Error:", err)
+				continue
+			}
+
+			go handleRequest(client)
+		}
+	*/
+}
+
+// Fetches Node's overlay neighbours from bootstrapper
+func setup() {
+	conn, erro := net.Dial("tcp", bootrapperAddr)
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
 	}
-	defer listener.Close()
+	defer conn.Close()
 
-	fmt.Println("Client is connected at ", adr)
-
-	// manda cenas ao server
-	requestFile(listener, filePath)
-
-	// Read server's response.
-	response := make([]byte, 4096)
-	n, err := listener.Read(response)
+	data := []byte("RESOLVE")
+	_, err := conn.Write(data)
 	if err != nil {
-		fmt.Println("Error reading response:", err)
-		os.Exit(1)
+		fmt.Println("Error:", err)
+		return
 	}
 
-	r := string(response[:n])
+	decoder := gob.NewDecoder(conn)
 
-	if r == "GO" {
-		fmt.Println("Server ready for file transfer")
-		fileTransfer(listener, filePath)
-		fmt.Println("Received file successfully")
-	} else {
-		fmt.Println("The file was not found")
+	var neighboursArray []string
+	err = decoder.Decode(&neighboursArray)
+	if err != nil {
+		fmt.Println("Erro a receber vizinhos: ", err)
+		return
 	}
 
-	fmt.Println("Closing connection...")
+	addNeighbours(neighboursArray)
+
+	fmt.Println("Recebi os vizinhos ", neighboursArray)
+}
+
+func addNeighbours(array []string) {
+	for _, n := range array {
+		neighboursTable[n] = neighbour{
+			flag:    0,
+			latency: 0,
+			loss:    0,
+		}
+	}
 }
 
 func requestFile(conn net.Conn, filePath string) {

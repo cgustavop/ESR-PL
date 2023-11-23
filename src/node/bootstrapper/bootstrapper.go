@@ -1,6 +1,7 @@
 package bootstrapper
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,14 +12,8 @@ var tree map[string][]string
 
 func Run() {
 	loadTree()
-	udpAddr, err := net.ResolveUDPAddr("udp", "localhost:8080")
 
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	listener, erro := net.ListenUDP("udp", udpAddr)
+	listener, erro := net.Listen("tcp", "localhost:8080")
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
@@ -28,17 +23,15 @@ func Run() {
 	fmt.Println("Server is listening on port 8080")
 
 	for {
-		var buf [512]byte
-		_, addr, err := listener.ReadFromUDP(buf[0:])
+		client, err := listener.Accept()
 		if err != nil {
-			fmt.Println(err)
-			return
+			fmt.Println("Error:", err)
+			continue
 		}
 
-		go handleRequest(listener, addr) // go X arranca uma nova thread que executa a função X
-		// Write back the message over UPD
-
+		go handleRequest(client)
 	}
+
 }
 
 func loadTree() {
@@ -58,11 +51,12 @@ func loadTree() {
 		fmt.Println("Error decoding JSON:", err)
 		return
 	}
-
-	for key, value := range tree {
-		fmt.Printf("Key: %s\n", key)
-		fmt.Printf("Array Values: %v\n", value)
-	}
+	/*
+		for key, value := range tree {
+			fmt.Printf("Key: %s\n", key)
+			fmt.Printf("Array Values: %v\n", value)
+		}
+	*/
 }
 
 func getNeighbours(ip string) ([]string, error) {
@@ -70,16 +64,39 @@ func getNeighbours(ip string) ([]string, error) {
 
 	value, found := tree[ip]
 	if !found {
-		return []string{}, fmt.Errorf("Key not found in the map: %s", ip)
+		return []string{}, fmt.Errorf("Vizinho não se encontra no ficheiro JSON: %s", ip)
 	}
 	return value, nil
 }
 
-func handleRequest(conn *net.UDPConn, client *net.UDPAddr) {
-	neighboursArray, _ := getNeighbours(client.IP.String())
+func handleRequest(conn net.Conn) {
+	request := make([]byte, 4096)
+	msg, err := conn.Read(request)
+	if err != nil {
+		fmt.Println("Erro a ler mensagem do cliente:", err)
+		return
+	}
 
-	arrayStr := fmt.Sprintf("%v", neighboursArray)
-	data := []byte(arrayStr)
+	r := string(request[:msg])
 
-	conn.WriteToUDP(data, client)
+	if r != "RESOLVE" {
+		fmt.Println("Pedido inválido")
+		return
+	}
+
+	addr, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
+	ip := addr.IP.String()
+	neighboursArray, _ := getNeighbours(ip)
+	println(ip)
+
+	encoder := gob.NewEncoder(conn)
+
+	// Encode and send the array through the connection
+	err = encoder.Encode(neighboursArray)
+	if err != nil {
+		fmt.Println("Error encoding and sending data:", err)
+		return
+	}
+	fmt.Println("Vizinhos enviados ", neighboursArray)
+
 }
