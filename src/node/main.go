@@ -2,24 +2,29 @@ package main
 
 import (
 	"encoding/gob"
+	"errors"
 	"esr/node/bootstrapper"
 	"flag"
 	"fmt"
 	"net"
-	"os"
 )
 
 /*
 pedido bootrapper
 ficar à escuta no TCP
+
 	handler pedido de stream
+
 gestor de vizinhos
+
 	map[filePath string]map[ip string]()
 	ou
 	map[ip_vizinho string]bool on
+
 faz pedido de stream
 video stream player
 */
+var ErrNoFavNeighbours = errors.New("No favourite neighbours found")
 
 var rpFlag bool
 
@@ -27,6 +32,12 @@ type neighbour struct {
 	flag    int
 	latency int
 	loss    int
+}
+
+// pacote
+type packet struct {
+	reqType int
+	payload string
 }
 
 var neighboursTable map[string]neighbour
@@ -55,7 +66,28 @@ func main() {
 	// faz pedido ao bootstrapper e guarda vizinhos
 	setup()
 
-	select {}
+	// à escuta de pedidos de outros nodos
+	listener, erro := net.Listen("tcp", ":8081")
+	if erro != nil {
+		fmt.Println("Error:", erro)
+		return
+	}
+	defer listener.Close()
+
+	fmt.Println("Node is listening on port 8081")
+
+	for {
+		client, err := listener.Accept()
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+
+		go handleRequest(client)
+	}
+
+	//select {}
+
 	/*
 		if filePath != "" {
 			// go requestStream(filePath)
@@ -112,16 +144,6 @@ func setup() {
 	fmt.Println("Recebi os vizinhos ", neighboursArray)
 }
 
-func addNeighbours(array []string) {
-	for _, n := range array {
-		neighboursTable[n] = neighbour{
-			flag:    0,
-			latency: 0,
-			loss:    0,
-		}
-	}
-}
-
 func requestFile(conn net.Conn, filePath string) {
 	data := []byte(filePath)
 	_, err := conn.Write(data)
@@ -131,6 +153,107 @@ func requestFile(conn net.Conn, filePath string) {
 	}
 }
 
+func handleRequest(client net.Conn) {
+	// lê pacote
+	decoder := gob.NewDecoder(client)
+
+	var receivedData packet
+	err := decoder.Decode(&receivedData)
+	if err != nil {
+		fmt.Println("Erro no decode da mensagem: ", err)
+		return
+	}
+
+	// switch case pelo tipo (0-flood, 1-request, 2-response, 3-control)
+	switch receivedData.reqType {
+	case 0:
+		//flood protocol
+		println("Flood Package received")
+	case 1:
+		println("Stream Request received")
+		streamRequest(client, receivedData.payload)
+		// abre multicast e faz stream
+	case 2:
+		//
+	case 3:
+		// control packets
+		println("Control Packet received")
+	}
+}
+
+func streamRequest(conn net.Conn, payload string) {
+
+	println(payload)
+	// check table
+	// if not in table sendRequest
+}
+
+func sendRequest(conn net.Conn, filePath string) {
+	request := packet{
+		reqType: 1,
+		payload: filePath,
+	}
+	// envia aos vizinho preferido
+	// getFavNeighbour() -> ip
+	neighbourIP, err := getFavNeighbour()
+	if err != nil {
+		println("Erro: ", err)
+		return
+	}
+
+	// connect TCP (ip)
+	neighbourConn, erro := net.Dial("tcp", neighbourIP+":8081")
+	if erro != nil {
+		fmt.Println("Error:", erro)
+		return
+	}
+	defer neighbourConn.Close()
+	// espera resposta TCP
+	encoder := gob.NewEncoder(conn)
+
+	// Encode and send the array through the connection
+	err = encoder.Encode(request)
+	if err != nil {
+		fmt.Println("Error encoding and sending data:", err)
+		return
+	}
+	fmt.Println("Enviei pedido a ", neighbourIP)
+
+	// info pacote (guarda na tabela)
+	var receivedData packet
+	decoder := gob.NewDecoder(conn)
+	err = decoder.Decode(&receivedData)
+	if err != nil {
+		fmt.Println("Erro no decode da mensagem: ", err)
+		return
+	}
+
+	println(receivedData.payload)
+
+	// recebe stream
+
+}
+
+func addNeighbours(array []string) {
+	for _, n := range array {
+		neighboursTable[n] = neighbour{
+			flag:    1,
+			latency: 0,
+			loss:    0,
+		}
+	}
+}
+
+func getFavNeighbour() (string, error) {
+	for ip, n := range neighboursTable {
+		if n.flag == 1 {
+			return ip, nil
+		}
+	}
+	return "", ErrNoFavNeighbours
+}
+
+/*
 func fileTransfer(connTCP net.Conn, filePath string) {
 	var packetCount int
 	packetChan := make(chan struct{})
@@ -209,3 +332,4 @@ func receivePackets(listener *net.UDPConn, filePath string, packetChan chan stru
 
 	}
 }
+*/
