@@ -15,17 +15,17 @@ func Run() {
 
 	listener, erro := net.Listen("tcp", "localhost:8080")
 	if erro != nil {
-		fmt.Println("Error:", erro)
+		fmt.Println("[bs] Error:", erro)
 		return
 	}
 	defer listener.Close()
 
-	fmt.Println("Server is listening on port 8080")
+	fmt.Println("[bs] Server is listening on port 8080")
 
 	for {
 		client, err := listener.Accept()
 		if err != nil {
-			fmt.Println("Error:", err)
+			fmt.Println("[bs] Error:", err)
 			continue
 		}
 
@@ -39,7 +39,7 @@ func loadTree() {
 	// carrega ficheiro json
 	file, err := os.Open(path)
 	if err != nil {
-		fmt.Println("Error opening file:", err)
+		fmt.Println("[bs] Error opening file:", err)
 		return
 	}
 	defer file.Close()
@@ -48,7 +48,7 @@ func loadTree() {
 	tree = make(map[string][]string)
 
 	if err := decoder.Decode(&tree); err != nil {
-		fmt.Println("Error decoding JSON:", err)
+		fmt.Println("[bs] Error decoding JSON:", err)
 		return
 	}
 	/*
@@ -73,14 +73,14 @@ func handleRequest(conn net.Conn) {
 	request := make([]byte, 4096)
 	msg, err := conn.Read(request)
 	if err != nil {
-		fmt.Println("Erro a ler mensagem do cliente:", err)
+		fmt.Println("[bs] Erro a ler mensagem do cliente:", err)
 		return
 	}
 
 	r := string(request[:msg])
 
 	if r != "RESOLVE" {
-		fmt.Println("Pedido inválido")
+		fmt.Println("[bs] Pedido inválido")
 		return
 	}
 
@@ -94,9 +94,9 @@ func handleRequest(conn net.Conn) {
 	// Encode and send the array through the connection
 	err = encoder.Encode(neighboursArray)
 	if err != nil {
-		fmt.Println("Error encoding and sending data:", err)
+		fmt.Println("[bs] Error encoding and sending data:", err)
 		return
 	}
-	fmt.Println("Vizinhos enviados ", neighboursArray)
+	fmt.Println("[bs] Vizinhos enviados ", neighboursArray)
 
 }

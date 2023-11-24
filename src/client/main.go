@@ -1,133 +1,99 @@
 package main
 
 import (
+	"encoding/gob"
+	"flag"
 	"fmt"
 	"net"
-	"os"
 )
 
-func main() {
-	filePath := os.Args[1]
+// pacote
+type packet struct {
+	ReqType int
+	Payload string
+}
 
-	// abrir a socket para receber pedidos
-	adr := "localhost:8080"
-	listener, erro := net.Dial("tcp", adr)
+func main() {
+	var file string
+	flag.StringVar(&file, "f", "", "requests a stream for the given file")
+
+	flag.Parse()
+
+	if file != "" {
+		// corre bootstrapper em segundo plano
+		requestStream("localhost", file)
+	}
+}
+
+func requestStream(neighbourIP string, filePath string) {
+	request := packet{
+		ReqType: 1,
+		Payload: filePath,
+	}
+
+	// connect TCP (ip)
+	neighbourConn, erro := net.Dial("tcp", "localhost:8081")
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
 	}
-	defer listener.Close()
+	defer neighbourConn.Close()
+	// espera resposta TCP
+	encoder := gob.NewEncoder(neighbourConn)
 
-	fmt.Println("Client is connected at ", adr)
-
-	// manda cenas ao server
-	requestFile(listener, filePath)
-
-	// Read server's response.
-	response := make([]byte, 4096)
-	n, err := listener.Read(response)
+	// Encode and send the array through the connection
+	err := encoder.Encode(request)
 	if err != nil {
-		fmt.Println("Error reading response:", err)
-		os.Exit(1)
-	}
-
-	r := string(response[:n])
-
-	if r == "GO" {
-		fmt.Println("Server ready for file transfer")
-		fileTransfer(listener, filePath)
-		fmt.Println("Received file successfully")
-	} else {
-		fmt.Println("The file was not found")
-	}
-
-	fmt.Println("Closing connection...")
-}
-
-func requestFile(conn net.Conn, filePath string) {
-	data := []byte(filePath)
-	_, err := conn.Write(data)
-	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("Error encoding and sending data:", err)
 		return
 	}
-}
+	fmt.Println("Enviei pedido a ", neighbourIP)
 
-func fileTransfer(connTCP net.Conn, filePath string) {
-	var packetCount int
-	packetChan := make(chan struct{})
-	// abre conn UDP
-
-	addr, err := net.ResolveUDPAddr("udp", connTCP.RemoteAddr().String())
-	addr.Port = 8081
-	listenerUDP, err := net.ListenUDP("udp", addr)
+	// info pacote (guarda na tabela)
+	var receivedData packet
+	decoder := gob.NewDecoder(neighbourConn)
+	err = decoder.Decode(&receivedData)
 	if err != nil {
-		fmt.Println("Error listening:", err)
+		fmt.Println("Erro no decode da mensagem: ", err)
 		return
 	}
-	defer listenerUDP.Close()
-	fmt.Println("Connected at ", addr)
-	// recebe pacotes
-	go receivePackets(listenerUDP, filePath, packetChan, &packetCount)
 
-	//espera EOF
-	response := make([]byte, 4096)
-	msg, err := connTCP.Read(response)
-	r := string(response[:msg])
-	if err != nil {
-		fmt.Println("Error reading response:", err)
-		os.Exit(1)
-	}
+	println(receivedData.Payload)
 
-	//devolve numero de pacotes recebidos
-	if r == "EOF" {
-		close(packetChan)
-		fmt.Println(packetCount)
-		data := []byte(fmt.Sprintf("%d", packetCount))
-		_, err := connTCP.Write(data)
-		if err != nil {
-			fmt.Println("Error:", err)
-			return
-		}
-	}
-
+	// junta-se ao grupo multicast do vizinho
+	multicastAddr := neighbourIP + ":" + receivedData.Payload
+	joinMulticastStream(multicastAddr)
 }
 
-func receivePackets(listener *net.UDPConn, filePath string, packetChan chan struct{}, packetCount *int) {
-	file, err := os.Create(filePath)
+func joinMulticastStream(multicastAddr string) {
+
+	// Resolve multicast address
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:8888")
 	if err != nil {
-		fmt.Println("Error creating file:", err)
+		fmt.Println("Error resolving address:", err)
 		return
 	}
-	defer file.Close()
 
-	fmt.Println("Ready for file transfer")
+	// Join the multicast group
+	conn, err := net.ListenMulticastUDP("udp", nil, addr)
+	if err != nil {
+		fmt.Println("Error joining multicast:", err)
+		return
+	}
+	defer conn.Close()
 
-	// Set buffer size
-	buffer := make([]byte, 1472)
+	fmt.Println("Multicast server joined group", "127.0.0.1:8888")
 
-	// Loop to receive and write packets to the file
+	// Buffer for incoming data
+	buffer := make([]byte, 1024)
+
 	for {
-		select {
-		case <-packetChan:
-			fmt.Println("Stopping goroutine...")
-			return
-		default:
-			// Receive a packet from the sender
-			n, err := listener.Read(buffer)
-			if err != nil {
-				fmt.Println("Error receiving data:", err)
-				return
-			}
-
-			// Write the received data to the file
-			_, err = file.Write(buffer[:n])
-			if err != nil {
-				fmt.Println("Error writing to file:", err)
-				return
-			}
-			*packetCount++
+		// Read data from the connection
+		n, src, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			fmt.Println("Error reading:", err)
+			continue
 		}
-
+		fmt.Printf("Received %d bytes from %s: %s\n", n, src, string(buffer[:n]))
 	}
 }
