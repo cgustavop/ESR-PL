@@ -165,14 +165,14 @@ func streamRequest(client net.Conn, filePath string) {
 func streamFile(client net.Conn, port string, filePath string) {
 	//ip := client.RemoteAddr().(*net.TCPAddr).IP.String()
 	//multicastAddr, err := net.ResolveUDPAddr("udp", ip+":"+port)
-	multicastAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+port)
+	multicastAddr, err := net.ResolveUDPAddr("udp4", "239.10.20.30:"+port)
 	if err != nil {
 		fmt.Println("Error resolving address:", err)
 		return
 	}
 
 	// Create a UDP connection
-	conn, err := net.DialUDP("udp", nil, multicastAddr)
+	conn, err := net.DialUDP("udp4", nil, multicastAddr)
 	if err != nil {
 		fmt.Println("Error dialing:", err)
 		return
@@ -188,7 +188,7 @@ func streamFile(client net.Conn, port string, filePath string) {
 	for {
 		println(hello)
 		conn.Write([]byte(hello))
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 }
 
@@ -272,7 +272,7 @@ func requestStream(filePath string) {
 	println(receivedData.Payload)
 
 	// junta-se ao grupo multicast do vizinho
-	multicastAddr := neighbourIP + ":" + receivedData.Payload
+	multicastAddr := "239.10.20.30" + ":" + receivedData.Payload
 	joinMulticastStream(multicastAddr)
 
 }
@@ -294,20 +294,34 @@ func joinMulticastStream(multicastAddr string) {
 	}
 	defer conn.Close()
 
-	fmt.Println("Multicast server joined group", "localhost:8888")
+	fmt.Println("Multicast server joined group", "239.10.20.30:8888")
 
-	// Buffer for incoming data
-	buffer := make([]byte, 1024)
-
+	maxDatagramSize := 8192
+	conn.SetReadBuffer(maxDatagramSize)
+	
+	// Loop forever reading from the socket
 	for {
-		// Read data from the connection
-		n, src, err := conn.ReadFromUDP(buffer)
+		buffer := make([]byte, maxDatagramSize)
+		numBytes, src, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			fmt.Println("Error reading:", err)
 			continue
 		}
-		fmt.Printf("Received %d bytes from %s: %s\n", n, src, string(buffer[:n]))
+
+		fmt.Printf("Received %d bytes from %s: %s\n", numBytes, src, string(buffer[:numBytes]))
 	}
+	// Buffer for incoming data
+	// buffer := make([]byte, 1024)
+
+	// for {
+	// 	// Read data from the connection
+	// 	n, src, err := conn.ReadFromUDP(buffer)
+	// 	if err != nil {
+	// 		fmt.Println("Error reading:", err)
+	// 		continue
+	// 	}
+	// 	fmt.Printf("Received %d bytes from %s: %s\n", n, src, string(buffer[:n]))
+	// }
 }
 
 func addNeighbours(array []string) {
