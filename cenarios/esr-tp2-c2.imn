@@ -167,7 +167,7 @@ canvas c1 {
 option global {
     interface_names no
     ip_addresses yes
-    ipv6_addresses yes
+    ipv6_addresses no
     node_labels yes
     link_labels yes
     show_api no
