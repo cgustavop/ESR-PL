@@ -35,6 +35,7 @@ var fileStreamsAvailable map[string]int
 
 // hard-coded
 var bootrapperAddr string = "localhost:8080"
+var activeStreams int = 0
 
 func main() {
 	neighboursTable = make(map[string]neighbour)
@@ -55,14 +56,17 @@ func main() {
 		go bootstrapper.Run()
 	}
 	if rpFlag {
+		go debug()
 		//go streamFile("8888", "teste")
+		//fileStreamsAvailable["teste"] = 8888
 	}
 
 	// faz pedido ao bootstrapper e guarda vizinhos
 	setup()
 
 	if !rpFlag {
-		requestStream("teste")
+		println("File: ", filePath)
+		requestStream(filePath)
 	} else {
 
 		// à escuta de pedidos de outros nodos
@@ -119,6 +123,14 @@ func setup() {
 	fmt.Println("Recebi os vizinhos ", neighboursArray)
 }
 
+func debug() {
+	for {
+		fmt.Printf("[DEBUG]----------\n%d active streams\n-----------------\n", activeStreams)
+		fmt.Printf("%v\n", fileStreamsAvailable)
+		time.Sleep(5 * time.Second)
+	}
+}
+
 func handleRequest(client net.Conn) {
 	// lê pacote
 	decoder := gob.NewDecoder(client)
@@ -137,8 +149,8 @@ func handleRequest(client net.Conn) {
 		println("Flood Package received")
 	case 1:
 		println("Stream Request received")
-		//streamRequest(client, receivedData.payload)
-		streamFile(client, "8888", "teste")
+		streamRequest(client, receivedData.Payload)
+		//streamFile(client, "8888", "teste")
 		// abre multicast e faz stream
 	case 2:
 		// recebe resposta a pedido
@@ -155,14 +167,26 @@ func streamRequest(client net.Conn, filePath string) {
 	streamPort, ok := fileStreamsAvailable[filePath]
 	if !ok {
 		// if not in table sendRequest
-		requestStream(filePath)
+		println("não tenho o ficheiro: ", filePath)
+
+		// PARA TESTAR (substituindo o requestStream feito ao RP estou a criar uma stream no nodo que recebeu o pedido)
+		//requestStream(filePath)
+		println("new stream: ", filePath)
+		portAux := 8000 + activeStreams
+		port := strconv.Itoa(portAux)
+		go streamFile(client, port, filePath)
+
+		redirectClient(client, port, filePath)
+
 	} else {
 		// invite client to join multicast group
-		redirectClient(client, streamPort, filePath)
+		println("Stream já existe, redirecionando cliente...")
+		redirectClient(client, strconv.Itoa(streamPort), filePath)
 	}
 }
 
 func streamFile(client net.Conn, port string, filePath string) {
+
 	//ip := client.RemoteAddr().(*net.TCPAddr).IP.String()
 	//multicastAddr, err := net.ResolveUDPAddr("udp", ip+":"+port)
 	multicastAddr, err := net.ResolveUDPAddr("udp4", "239.10.20.30:"+port)
@@ -181,10 +205,11 @@ func streamFile(client net.Conn, port string, filePath string) {
 
 	fmt.Println("Connected to multicast group", multicastAddr)
 	fileStreamsAvailable[filePath], _ = strconv.Atoi(port)
+	activeStreams++
 
 	handshake(client, filePath, port)
 
-	hello := "hello, world"
+	hello := "hello, world! i'm streaming " + filePath
 	for {
 		println(hello)
 		conn.Write([]byte(hello))
@@ -212,10 +237,10 @@ func handshake(client net.Conn, filePath string, port string) {
 	fmt.Println("Enviei informação sobre a stream a ", client.RemoteAddr().String())
 }
 
-func redirectClient(client net.Conn, port int, filePath string) {
+func redirectClient(client net.Conn, port string, filePath string) {
 	request := packet{
 		ReqType: 2,
-		Payload: string(rune(port)),
+		Payload: port,
 	}
 
 	encoder := gob.NewEncoder(client)
@@ -275,6 +300,12 @@ func requestStream(filePath string) {
 	multicastAddr := "239.10.20.30" + ":" + receivedData.Payload
 	joinMulticastStream(multicastAddr)
 
+	// TODO
+	// 1 guardar o que vem do multicast num buffer
+	// 2 abrir um multicast
+	// 3 adicionar o ficheiro à lista de ficheiros a serem streamed
+	// 4 redirectClient para a nova porta multicast
+
 }
 
 func joinMulticastStream(multicastAddr string) {
@@ -294,11 +325,11 @@ func joinMulticastStream(multicastAddr string) {
 	}
 	defer conn.Close()
 
-	fmt.Println("Multicast server joined group", "239.10.20.30:8888")
+	fmt.Println("Multicast server joined group", multicastAddr)
 
 	maxDatagramSize := 8192
 	conn.SetReadBuffer(maxDatagramSize)
-	
+
 	// Loop forever reading from the socket
 	for {
 		buffer := make([]byte, maxDatagramSize)
@@ -310,18 +341,6 @@ func joinMulticastStream(multicastAddr string) {
 
 		fmt.Printf("Received %d bytes from %s: %s\n", numBytes, src, string(buffer[:numBytes]))
 	}
-	// Buffer for incoming data
-	// buffer := make([]byte, 1024)
-
-	// for {
-	// 	// Read data from the connection
-	// 	n, src, err := conn.ReadFromUDP(buffer)
-	// 	if err != nil {
-	// 		fmt.Println("Error reading:", err)
-	// 		continue
-	// 	}
-	// 	fmt.Printf("Received %d bytes from %s: %s\n", n, src, string(buffer[:n]))
-	// }
 }
 
 func addNeighbours(array []string) {
