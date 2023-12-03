@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -54,6 +55,7 @@ var bootstrapperAddr string
 var activeStreams int = 0
 var rpFlag bool
 var nodeAddr string
+var serverAddr string
 
 func main() {
 	neighboursTable = make(map[string]neighbour)
@@ -62,8 +64,8 @@ func main() {
 	flag.StringVar(&bootstrapperAddr, "bs", "", "sets the ip address of the bootstrapper node")
 	var startFlood bool
 	flag.BoolVar(&startFlood, "f", false, "starts flood")
-
 	flag.BoolVar(&rpFlag, "rp", false, "sets the node as the overlay's Rendezvous Point")
+	flag.StringVar(&serverAddr, "s", "", "sets the server wich the RP has connection to")
 	flag.StringVar(&nodeAddr, "ip", "", "sets the node ip")
 
 	//filePath := flag.String("stream", "", "requests a stream for the given file")
@@ -83,11 +85,19 @@ func main() {
 	// faz pedido ao bootstrapper e guarda vizinhos
 	setup()
 
+	if rpFlag && serverAddr != "" {
+		neighboursTable[serverAddr] = neighbour{
+			flag:    4,
+			latency: 0,
+			loss:    0,
+		}
+	}
+
 	if startFlood {
 		go flood()
 	}
 	if filePath != "" {
-		go requestStream()
+		go getStream(filePath)
 	}
 
 	// à escuta de pedidos de outros nodos
@@ -608,12 +618,19 @@ func addNeighbours(array []string) {
 }
 
 func getFavNeighbour() (string, error) {
+	var best int = 0
+	var bestip string
+
 	for ip, n := range neighboursTable {
-		if n.flag == 1 {
-			return ip, nil
+		if n.flag > best {
+			best = n.flag
+			bestip = ip
 		}
 	}
-	return "", ErrNoFavNeighbours
+	if best == 0 {
+		return "", ErrNoFavNeighbours
+	}
+	return bestip, nil
 }
 
 func floodRetransmit(receivedPkt payload) {
@@ -804,4 +821,62 @@ func flood() {
 	}
 
 	sendToNeighbours("", pkt)
+}
+
+func getStream(filePath string) {
+
+	request := packet{
+		ReqType:     1,
+		Description: filePath,
+		Payload: payload{
+			Sender: nodeAddr,
+		},
+	}
+	// envia aos vizinho preferido
+	// getFavNeighbour() -> ip
+	neighbourIP, err := getFavNeighbour()
+	if err != nil {
+		println("Erro: ", err)
+		return
+	}
+
+	// connect TCP (ip)
+	sourceConn, erro := net.Dial("tcp", neighbourIP+":8081")
+	if erro != nil {
+		fmt.Println("Error:", erro)
+		return
+	}
+	defer sourceConn.Close()
+	// espera resposta TCP
+	encoder := gob.NewEncoder(sourceConn)
+
+	// Encode and send the array through the connection
+	err = encoder.Encode(request)
+	if err != nil {
+		fmt.Println("Error encoding and sending data:", err)
+		return
+	}
+	fmt.Println("Enviei pedido de stream a ", neighbourIP)
+
+	// info pacote (guarda na tabela)
+	var receivedData packet
+	decoder := gob.NewDecoder(sourceConn)
+	err = decoder.Decode(&receivedData)
+	if err != nil {
+		fmt.Println("Erro no decode da mensagem: ", err)
+		return
+	}
+
+	println(receivedData.Description)
+	sourceUDPaddr := receivedData.Payload.Sender + ":" + receivedData.Description
+
+	if receivedData.Description == "404" {
+		fmt.Println("FICHEIRO NÃO EXISTE")
+	} else {
+		cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
+		err := cmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 }
