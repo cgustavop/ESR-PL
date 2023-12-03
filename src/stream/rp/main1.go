@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 func main() {
@@ -114,7 +115,7 @@ func main() {
 
 		// Buffer to store incoming data
 		buf := make([]byte, 2048)
-
+		time.Sleep(5 * time.Second)
 		// Continuously read data from the connection and redirect it
 		for {
 			n, _, err := connu.ReadFromUDP(buf)
