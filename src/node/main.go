@@ -13,9 +13,6 @@ import (
 
 var ErrNoFavNeighbours = errors.New("No favourite neighbour found")
 
-var rpFlag bool
-var nodeAddr string
-
 // flood
 type Flood struct {
 	HourIn        time.Time
@@ -38,6 +35,7 @@ type packet struct {
 }
 
 type payload struct {
+	Sender        string
 	HourIn        time.Time
 	AllNodes      []string
 	BacktraceSize int
@@ -51,15 +49,18 @@ var neighboursTable map[string]neighbour
 var fileStreamsAvailable map[string]int
 
 // hard-coded
-var bootrapperAddr string = "localhost:8080"
+var bootstrapperAddr string
 var activeStreams int = 0
+var rpFlag bool
+var nodeAddr string
 
 func main() {
 	neighboursTable = make(map[string]neighbour)
 	fileStreamsAvailable = make(map[string]int)
 
-	bsFlag := flag.Bool("bs", false, "sets the node as the overlay's Bootstrapper")
-	startFlood := flag.Bool("flood", false, "starts flood")
+	flag.StringVar(&bootstrapperAddr, "bs", "", "sets the ip address of the bootstrapper node")
+	var startFlood bool
+	flag.BoolVar(&startFlood, "f", false, "starts flood")
 
 	flag.BoolVar(&rpFlag, "rp", false, "sets the node as the overlay's Rendezvous Point")
 	flag.StringVar(&nodeAddr, "ip", "", "sets the node ip")
@@ -72,61 +73,55 @@ func main() {
 
 	flag.Parse()
 
-	if *bsFlag {
+	if bootstrapperAddr == "" {
 		// corre bootstrapper em segundo plano
-		go bootstrapper.Run()
-	}
-	if rpFlag {
-		go debug()
-		//go streamFile("8888", "teste")
-		//fileStreamsAvailable["teste"] = 8888
-	}
-	if *startFlood {
-		flood()
+		go bootstrapper.Run(nodeAddr)
+		bootstrapperAddr = nodeAddr
 	}
 
+	go debug()
 	// faz pedido ao bootstrapper e guarda vizinhos
 	setup()
 
-	if !rpFlag {
-		println("File: ", filePath)
-		requestStream(filePath)
-	} else {
-
-		// à escuta de pedidos de outros nodos
-		listener, erro := net.Listen("tcp", nodeAddr+":8081")
-		if erro != nil {
-			fmt.Println("Error:", erro)
-			return
-		}
-		defer listener.Close()
-
-		fmt.Println("Node is listening on port 8081")
-
-		for {
-			client, err := listener.Accept()
-			if err != nil {
-				fmt.Println("Error:", err)
-				continue
-			}
-
-			go handleRequest(client)
-		}
+	if startFlood {
+		go flood()
 	}
 
-	select {}
-}
-
-// Fetches Node's overlay neighbours from bootstrapper
-func setup() {
-	conn, erro := net.Dial("tcp", bootrapperAddr)
+	// à escuta de pedidos de outros nodos
+	listener, erro := net.Listen("tcp", nodeAddr+":8081")
 	if erro != nil {
 		fmt.Println("Error:", erro)
 		return
 	}
+	defer listener.Close()
+
+	fmt.Println("Node is listening on port 8081")
+
+	for {
+		client, err := listener.Accept()
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+
+		go handleRequest(client)
+	}
+
+	select {}
+
+}
+
+// Fetches Node's overlay neighbours from bootstrapper
+func setup() {
+	conn, erro := net.Dial("tcp", bootstrapperAddr+":8080")
+	if erro != nil {
+		fmt.Println("Error:", erro)
+		ducktape()
+		return
+	}
 	defer conn.Close()
 
-	data := []byte("RESOLVE")
+	data := []byte(nodeAddr)
 	_, err := conn.Write(data)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -147,11 +142,22 @@ func setup() {
 	fmt.Println("Recebi os vizinhos ", neighboursArray)
 }
 
+func ducktape() {
+	fmt.Println("ducktaping...")
+	n, _ := bootstrapper.GetNeighbours2(nodeAddr, bootstrapper.LoadTree2())
+	addNeighbours(n)
+}
+
 func debug() {
+	//for {
+	//	fmt.Printf("[DEBUG]----------\n%d active streams\n-----------------\n", activeStreams)
+	//	fmt.Printf("%v\n", fileStreamsAvailable)
+	//	time.Sleep(20 * time.Second)
+	//}
 	for {
-		fmt.Printf("[DEBUG]----------\n%d active streams\n-----------------\n", activeStreams)
-		fmt.Printf("%v\n", fileStreamsAvailable)
-		time.Sleep(5 * time.Second)
+		fmt.Printf("[DEBUG]----------\n%d NEIGHBOUR STATUS \n-----------------\n", len(neighboursTable))
+		fmt.Printf("%v\n", neighboursTable)
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -172,9 +178,9 @@ func handleRequest(client net.Conn) {
 		//flood protocol
 		println("Flood Package received")
 		if rpFlag {
-			floodPivotPoint(client, receivedData.Payload)
+			floodPivotPoint(receivedData.Payload)
 		} else {
-			floodRetransmit(client, receivedData.Payload)
+			floodRetransmit(receivedData.Payload)
 		}
 	case 1:
 		println("Stream Request received")
@@ -375,7 +381,7 @@ func joinMulticastStream(multicastAddr string) {
 func addNeighbours(array []string) {
 	for _, n := range array {
 		neighboursTable[n] = neighbour{
-			flag:    1,
+			flag:    0, //inicialmente sem ligação ao RP
 			latency: 0,
 			loss:    0,
 		}
@@ -391,19 +397,29 @@ func getFavNeighbour() (string, error) {
 	return "", ErrNoFavNeighbours
 }
 
-func floodRetransmit(fromNeighbour net.Conn, receivedPkt payload) {
-	ipNeighbour := fromNeighbour.RemoteAddr().String()
+func floodRetransmit(receivedPkt payload) {
+	ipNeighbour := receivedPkt.Sender
+	println("[flood debug] tempo total:", receivedPkt.TotalTime)
 	// recebe pacote se vier com TotalTime > 0 então envia para o ip no backtrace
-	if receivedPkt.TotalTime > 0 {
+	if receivedPkt.TotalTime >= 0 {
 		saveFavNeighbour(receivedPkt)
 		sendBack(receivedPkt)
 	} else {
-		receivedPkt.AllNodes = append(receivedPkt.AllNodes, nodeAddr)
-		receivedPkt.BacktraceSize++
+		a := receivedPkt.AllNodes
+		a = append(a, nodeAddr)
+		btSize := receivedPkt.BacktraceSize + 1
+
+		response := payload{
+			Sender:        nodeAddr,
+			HourIn:        receivedPkt.HourIn,
+			AllNodes:      a,
+			BacktraceSize: btSize,
+			TotalTime:     receivedPkt.TotalTime,
+		}
 
 		retransmitPkt := packet{
 			ReqType: 0,
-			Payload: receivedPkt,
+			Payload: response,
 		}
 
 		sendToNeighbours(ipNeighbour, retransmitPkt)
@@ -415,7 +431,8 @@ func saveFavNeighbour(pkt payload) {
 	flagVal := 2
 
 	// se quem enviou for o rp então guarda vizinho com a flag 3
-	if len(pkt.AllNodes) == (pkt.BacktraceSize - 1) {
+	fmt.Printf("bts: %v\n%v\nlength all nodes: %v\n", pkt.BacktraceSize, pkt.AllNodes, len(pkt.AllNodes))
+	if len(pkt.AllNodes) == pkt.BacktraceSize+2 {
 		flagVal = 3
 	}
 
@@ -424,26 +441,37 @@ func saveFavNeighbour(pkt payload) {
 		latency: pkt.TotalTime,
 		loss:    0,
 	}
-
-	neighbourIp := pkt.AllNodes[pkt.BacktraceSize]
+	sender := pkt.Sender
 
 	// compara latência antes de guardar vizinho
-	if compareNeighbourMetric(n, neighbourIp) {
-		neighboursTable[neighbourIp] = n
+	if changeNeighbourMetric(n, sender) {
+		neighboursTable[sender] = n
+		println("Guardei o vizinho ", sender)
 	}
 }
 
 func sendBack(pkt payload) {
-	pkt.BacktraceSize--
+	fmt.Printf("%v\n", pkt)
+	btSize := pkt.BacktraceSize - 1
 
-	if pkt.BacktraceSize == 0 {
+	if btSize == -1 {
 		return
 	}
 
-	neighbourIp := pkt.AllNodes[pkt.BacktraceSize]
+	response := payload{
+		Sender:        nodeAddr,
+		HourIn:        pkt.HourIn,
+		AllNodes:      pkt.AllNodes,
+		BacktraceSize: btSize,
+		TotalTime:     pkt.TotalTime,
+	}
+
+	neighbourIp := pkt.AllNodes[pkt.BacktraceSize-1]
+
+	println(neighbourIp)
 	retransmitPkt := packet{
 		ReqType: 0,
-		Payload: pkt,
+		Payload: response,
 	}
 
 	neighbourConn, erro := net.Dial("tcp", neighbourIp+":8081")
@@ -458,35 +486,42 @@ func sendBack(pkt payload) {
 	// Encode and send the array through the connection
 	err := encoder.Encode(retransmitPkt)
 	if err != nil {
-		fmt.Println("[handshake] Error encoding and sending data:", err)
+		fmt.Println("Error encoding and sending data:", err)
 		return
 	}
 	fmt.Println("Enviei flood packet a ", neighbourIp)
 }
 
-func compareNeighbourMetric(info neighbour, ip string) bool {
+func changeNeighbourMetric(info neighbour, ip string) bool {
 	current, ok := neighboursTable[ip]
 
-	if ok && current.latency < info.latency {
+	if ok && current.latency > info.latency || current.flag == 0 {
 		return true
 	}
 	return false
 }
 
-func floodPivotPoint(node net.Conn, receivedPkt payload) {
-	receivedPkt.AllNodes = append(receivedPkt.AllNodes, nodeAddr)
-	receivedPkt.BacktraceSize += 1
+func floodPivotPoint(receivedPkt payload) {
+	a := receivedPkt.AllNodes
+	a = append(a, nodeAddr)
 
 	currentTime := time.Now()
-	receivedPkt.TotalTime = int(currentTime.Sub(receivedPkt.HourIn).Milliseconds())
+	duration := int(currentTime.Sub(receivedPkt.HourIn).Milliseconds())
+
+	response := payload{
+		Sender:        nodeAddr,
+		HourIn:        receivedPkt.HourIn,
+		AllNodes:      a,
+		BacktraceSize: receivedPkt.BacktraceSize,
+		TotalTime:     duration,
+	}
 
 	retransmitPkt := packet{
 		ReqType: 0,
-		Payload: receivedPkt,
+		Payload: response,
 	}
 
-	node.Close()
-	ip := node.RemoteAddr().String()
+	ip := receivedPkt.Sender
 
 	neighbourConn, erro := net.Dial("tcp", ip+":8081")
 	if erro != nil {
@@ -537,10 +572,11 @@ func flood() {
 	nodes = append(nodes, nodeAddr)
 
 	pl := payload{
+		Sender:        nodeAddr,
 		HourIn:        time.Now(),
 		AllNodes:      nodes,
 		BacktraceSize: 0,
-		TotalTime:     0,
+		TotalTime:     -1,
 	}
 
 	pkt := packet{

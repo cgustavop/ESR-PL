@@ -10,17 +10,17 @@ import (
 
 var tree map[string][]string
 
-func Run() {
+func Run(ip string) {
 	loadTree()
-
-	listener, erro := net.Listen("tcp", "localhost:8080")
+	addr := ip+":8080"
+	listener, erro := net.Listen("tcp", addr)
 	if erro != nil {
 		fmt.Println("[bs] Error:", erro)
 		return
 	}
 	defer listener.Close()
-
-	fmt.Println("[bs] Server is listening on port 8080")
+	
+	fmt.Println("[bs] Bootstrapper is listening on ", addr)
 
 	for {
 		client, err := listener.Accept()
@@ -28,7 +28,6 @@ func Run() {
 			fmt.Println("[bs] Error:", err)
 			continue
 		}
-
 		go handleRequest(client)
 	}
 
@@ -51,12 +50,6 @@ func loadTree() {
 		fmt.Println("[bs] Error decoding JSON:", err)
 		return
 	}
-	/*
-		for key, value := range tree {
-			fmt.Printf("Key: %s\n", key)
-			fmt.Printf("Array Values: %v\n", value)
-		}
-	*/
 }
 
 func getNeighbours(ip string) ([]string, error) {
@@ -76,16 +69,10 @@ func handleRequest(conn net.Conn) {
 		fmt.Println("[bs] Erro a ler mensagem do cliente:", err)
 		return
 	}
+	println(string(request[:msg]))
+	
+	var ip string = string(request[:msg])
 
-	r := string(request[:msg])
-
-	if r != "RESOLVE" {
-		fmt.Println("[bs] Pedido inválido")
-		return
-	}
-
-	addr, _ := net.ResolveTCPAddr("tcp", conn.RemoteAddr().String())
-	ip := addr.IP.String()
 	neighboursArray, _ := getNeighbours(ip)
 	println(ip)
 
@@ -99,4 +86,33 @@ func handleRequest(conn net.Conn) {
 	}
 	fmt.Println("[bs] Vizinhos enviados ", neighboursArray)
 
+}
+
+func LoadTree2() map[string][]string {
+	path := "tree.json"
+	// carrega ficheiro json
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Println("[bs] Error opening file:", err)
+		return make(map[string][]string)
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	tree := make(map[string][]string)
+
+	if err := decoder.Decode(&tree); err != nil {
+		fmt.Println("[bs] Error decoding JSON:", err)
+		return make(map[string][]string)
+	}
+
+	return tree
+}
+
+func GetNeighbours2(ip string, tree map[string][]string ) ([]string, error) {
+	value, found := tree[ip]
+	if !found {
+		return []string{}, fmt.Errorf("Vizinho não se encontra no ficheiro JSON: %s", ip)
+	}
+	return value, nil
 }
