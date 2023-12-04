@@ -99,8 +99,6 @@ func setup() {
 		fileAvailable[filePath] = port
 		activeStreams++
 	}
-
-	select {}
 }
 
 func handleRequest(client net.Conn) {
@@ -130,8 +128,8 @@ func handleRequest(client net.Conn) {
 }
 
 func streamFile(clientConn net.Conn, file string, clientAddr string) {
-	filePath := server + file + format
-	port, ok := fileAvailable[file]
+	filePath := server + "/" + file + format
+	port, ok := fileAvailable[filePath]
 	if ok {
 
 		encoder := gob.NewEncoder(clientConn)
@@ -150,7 +148,7 @@ func streamFile(clientConn net.Conn, file string, clientAddr string) {
 		}
 		fmt.Println("Enviei sinal a ", clientAddr)
 
-		addr := "udp://" + clientAddr + port
+		addr := "udp://" + clientAddr + ":" + port
 		cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", filePath, "-pix_fmt", "yuvj422p", "-s", "640x360", "-r", "25", "-c:v", "mjpeg", "-f", "mjpeg", addr)
 		err = cmd.Run()
 		if err != nil {

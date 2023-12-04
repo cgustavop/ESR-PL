@@ -56,6 +56,7 @@ var activeStreams int = 0
 var rpFlag bool
 var nodeAddr string
 var serverAddr string
+var floodUpdate int = 0
 
 func main() {
 	neighboursTable = make(map[string]neighbour)
@@ -67,6 +68,9 @@ func main() {
 	flag.BoolVar(&rpFlag, "rp", false, "sets the node as the overlay's Rendezvous Point")
 	flag.StringVar(&serverAddr, "s", "", "sets the server wich the RP has connection to")
 	flag.StringVar(&nodeAddr, "ip", "", "sets the node ip")
+
+	var debugFlag bool
+	flag.BoolVar(&debugFlag, "d", false, "turn on debug mode")
 
 	//filePath := flag.String("stream", "", "requests a stream for the given file")
 
@@ -81,8 +85,11 @@ func main() {
 		bootstrapperAddr = nodeAddr
 	}
 
-	go debug()
+	if debugFlag {
+		go debug()
+	}
 	// faz pedido ao bootstrapper e guarda vizinhos
+
 	setup()
 
 	if rpFlag && serverAddr != "" {
@@ -93,12 +100,12 @@ func main() {
 		}
 	}
 
-	if startFlood {
+	if startFlood || filePath != "" {
 		go flood()
 	}
-	if filePath != "" {
-		go getStream(filePath)
-	}
+	// if filePath != "" {
+	// 	go getStream(filePath)
+	// }
 
 	// à escuta de pedidos de outros nodos
 	listener, erro := net.Listen("tcp", nodeAddr+":8081")
@@ -109,8 +116,12 @@ func main() {
 	defer listener.Close()
 
 	fmt.Println("Node is listening on port 8081")
-
+	// requestCount := 0
 	for {
+		// if floodUpdate > 0 && requestCount < 1 {
+		// 	requestCount++
+		// 	go getStream(filePath)
+		// }
 		client, err := listener.Accept()
 		if err != nil {
 			fmt.Println("Error:", err)
@@ -215,7 +226,7 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 	dataChannel, ok := fileStreamsAvailable[filePath]
 	if !ok {
 		// if not in table sendRequest
-		println("não tenho o ficheiro: ", filePath)
+		println("Não tenho stream de ", filePath)
 
 		// Shared channel to distribute received data to multiple goroutines
 		dataChannel := make(chan []byte)
@@ -251,168 +262,6 @@ func handshake(client net.Conn, filePath string, port string) {
 	fmt.Println("Enviei informação sobre a stream a ", client.RemoteAddr().String())
 }
 
-func redirectClient(client net.Conn, port string, filePath string) {
-	request := packet{
-		ReqType:     2,
-		Description: port,
-	}
-
-	encoder := gob.NewEncoder(client)
-
-	// Encode and send the array through the connection
-	err := encoder.Encode(request)
-	if err != nil {
-		fmt.Println("Error encoding and sending data:", err)
-		return
-	}
-	fmt.Println("Enviei convite para juntar ao multicast a ", client.RemoteAddr().String())
-}
-
-// func requestStream(clientConn net.Conn, filePath string, clientAddr string) {
-// 	request := packet{
-// 		ReqType:     1,
-// 		Description: filePath,
-// 		Payload: payload{
-// 			Sender: nodeAddr,
-// 		},
-// 	}
-// 	// envia aos vizinho preferido
-// 	// getFavNeighbour() -> ip
-// 	neighbourIP, err := getFavNeighbour()
-// 	if err != nil {
-// 		println("Erro: ", err)
-// 		return
-// 	}
-
-// 	// connect TCP (ip)
-// 	sourceConn, erro := net.Dial("tcp", neighbourIP+":8081")
-// 	if erro != nil {
-// 		fmt.Println("Error:", erro)
-// 		return
-// 	}
-// 	defer sourceConn.Close()
-// 	// espera resposta TCP
-// 	encoder := gob.NewEncoder(sourceConn)
-
-// 	// Encode and send the array through the connection
-// 	err = encoder.Encode(request)
-// 	if err != nil {
-// 		fmt.Println("Error encoding and sending data:", err)
-// 		return
-// 	}
-// 	fmt.Println("Enviei pedido a ", neighbourIP)
-
-// 	// info pacote (guarda na tabela)
-// 	var receivedData packet
-// 	decoder := gob.NewDecoder(sourceConn)
-// 	err = decoder.Decode(&receivedData)
-// 	if err != nil {
-// 		fmt.Println("Erro no decode da mensagem: ", err)
-// 		return
-// 	}
-
-// 	println(receivedData.Description)
-// 	sourceUDPaddr := receivedData.Payload.Sender + ":" + receivedData.Description
-
-// 	if receivedData.Description == "404" {
-// 		// avisa cliente/nodo atrás
-// 		port := "404"
-// 		encoder := gob.NewEncoder(clientConn)
-// 		noFileSignal := packet{
-// 			ReqType:     2,
-// 			Description: port,
-// 			Payload: payload{
-// 				Sender: nodeAddr,
-// 			},
-// 		}
-// 		// Encode and send the array through the connection
-// 		err = encoder.Encode(noFileSignal)
-// 		if err != nil {
-// 			fmt.Println("Error encoding and sending data:", err)
-// 			return
-// 		}
-// 		fmt.Println("FICHEIRO NÃO EXISTE: Enviei aviso a ", clientAddr)
-// 	} else {
-// 		//pronto para receber
-// 		// avisa cliente/nodo atrás
-// 		activeStreams++
-// 		portCalc := 8000 + activeStreams
-// 		port := strconv.Itoa(portCalc)
-// 		encoder := gob.NewEncoder(clientConn)
-// 		startSignal := packet{
-// 			ReqType:     2,
-// 			Description: port,
-// 			Payload: payload{
-// 				Sender: nodeAddr,
-// 			},
-// 		}
-// 		// Encode and send the array through the connection
-// 		err = encoder.Encode(startSignal)
-// 		if err != nil {
-// 			fmt.Println("Error encoding and sending data:", err)
-// 			return
-// 		}
-// 		fmt.Println("Enviei sinal a ", clientAddr)
-// 		// abre porta de leitura do servidor
-// 		// Resolve UDP address Server
-// 		srcAddr, err := net.ResolveUDPAddr("udp", sourceUDPaddr)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-
-// 		// Listen for UDP connections server
-// 		src, err := net.ListenUDP("udp", srcAddr)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-// 		defer src.Close()
-// 		// abre porta de escrita para o cliente
-// 		redirAddr, err := net.ResolveUDPAddr("udp", nodeAddr+":"+port)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-
-// 		// Dial UDP for redirection client
-// 		redirConn, err := net.DialUDP("udp", nil, redirAddr)
-// 		if err != nil {
-// 			log.Fatal(err)
-// 		}
-// 		defer redirConn.Close()
-
-// 		// Shared channel to distribute received data to multiple goroutines
-// 		dataChannel := make(chan []byte)
-
-// 		// Start a goroutine to distribute data among multiple consumer goroutines
-// 		go distributeData(dataChannel)
-
-// 		// Buffer to store incoming data
-// 		buf := make([]byte, 2048)
-// 		time.Sleep(5 * time.Second)
-// 		// Continuously read data from the connection and redirect it
-// 		//buffer := make([]byte, 1024)
-// 		for {
-// 			n, _, err := src.ReadFromUDP(buf)
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-// 			println("Recieved from source ", sourceUDPaddr)
-
-// 			//receivedData := make([]byte, n)
-// 			//copy(receivedData, buffer[:n])
-
-// 			// Send the received data to the channel for distribution
-// 			//dataChannel <- receivedData
-
-// 			// Redirect data
-// 			_, err = redirConn.Write(buf[:n])
-// 			if err != nil {
-// 				log.Fatal(err)
-// 			}
-// 			println("Sent to client ", nodeAddr+":"+port)
-// 		}
-// 	}
-// }
-
 func requestStream(clientConn net.Conn, filePath string, clientAddr string, dataChannel chan []byte) {
 	request := packet{
 		ReqType:     1,
@@ -425,8 +274,14 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 	// getFavNeighbour() -> ip
 	neighbourIP, err := getFavNeighbour()
 	if err != nil {
-		println("Erro: ", err)
-		return
+		println("Erro, vizinhos sem conexão: ", err)
+		flood()
+		for {
+			neighbourIP, err = getFavNeighbour()
+			if err != ErrNoFavNeighbours {
+				break
+			}
+		}
 	}
 
 	// connect TCP (ip)
@@ -457,7 +312,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 	}
 
 	println(receivedData.Description)
-	sourceUDPaddr := receivedData.Payload.Sender + ":" + receivedData.Description
+	//sourceUDPaddr := neighbourIP + ":" + receivedData.Description
 
 	if receivedData.Description == "404" {
 		// avisa cliente/nodo atrás
@@ -483,7 +338,16 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		//pronto para receber
 		// abre porta de leitura do servidor
 		// Resolve UDP address Server
-		srcAddr, err := net.ResolveUDPAddr("udp", sourceUDPaddr)
+
+		var addr string
+		if rpFlag {
+			addr = nodeAddr + ":" + receivedData.Description
+
+		} else {
+			addr = nodeAddr + ":" + receivedData.Description
+		}
+
+		srcAddr, err := net.ResolveUDPAddr("udp", addr)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -499,13 +363,13 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		buf := make([]byte, 2048)
 		time.Sleep(5 * time.Second)
 		// Continuously read data from the connection and redirect it
-		buffer := make([]byte, 1024)
+		buffer := make([]byte, 2048)
 		for {
 			n, _, err := src.ReadFromUDP(buf)
 			if err != nil {
 				log.Fatal(err)
 			}
-			println("Recieved from source ", sourceUDPaddr)
+			println("Received from source ", addr)
 
 			receivedData := make([]byte, n)
 			copy(receivedData, buffer[:n])
@@ -517,94 +381,59 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 }
 
 func distributeData(clientConn net.Conn, clientAddr string, dataChannel <-chan []byte) {
-	select {
-	case _, ok := <-dataChannel:
-		if !ok {
-			fmt.Println("Channel closed before receiving anything. Ficheiro não existe.")
-			return
-		}
-		activeStreams++
-		portCalc := 8000 + activeStreams
-		port := strconv.Itoa(portCalc)
-		encoder := gob.NewEncoder(clientConn)
-		startSignal := packet{
-			ReqType:     2,
-			Description: port,
-			Payload: payload{
-				Sender: nodeAddr,
-			},
-		}
-		// Encode and send the array through the connection
-		err := encoder.Encode(startSignal)
-		if err != nil {
-			fmt.Println("Error encoding and sending data:", err)
-			return
-		}
-		fmt.Println("Enviei sinal a ", clientAddr)
 
-		//abre porta de escrita para o cliente
-		redirAddr, err := net.ResolveUDPAddr("udp", nodeAddr+":"+port)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Dial UDP for redirection client
-		redirConn, err := net.DialUDP("udp", nil, redirAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer redirConn.Close()
-
-		for {
-			// Receive data from the channel
-			data := <-dataChannel
-
-			// Redirect data to client
-			_, err = redirConn.Write(data)
-			if err != nil {
-				log.Fatal(err)
-			}
-			println("Sent to client ", nodeAddr+":"+port)
-		}
-	default:
-		fmt.Println("[distributeData] No data received. ", clientAddr)
-	}
-
-}
-
-func joinMulticastStream(multicastAddr string) {
-
-	// Resolve multicast address
-	addr, err := net.ResolveUDPAddr("udp", multicastAddr)
-	if err != nil {
-		fmt.Println("Error resolving address:", err)
+	_, ok := <-dataChannel
+	if !ok {
+		fmt.Println("Channel closed before receiving anything. Ficheiro não existe.")
 		return
 	}
-
-	// Join the multicast group
-	conn, err := net.ListenMulticastUDP("udp", nil, addr)
+	activeStreams++
+	portCalc := 8000 + activeStreams
+	port := strconv.Itoa(portCalc)
+	encoder := gob.NewEncoder(clientConn)
+	startSignal := packet{
+		ReqType:     2,
+		Description: port,
+		Payload: payload{
+			Sender: nodeAddr,
+		},
+	}
+	// Encode and send the array through the connection
+	err := encoder.Encode(startSignal)
 	if err != nil {
-		fmt.Println("Error joining multicast:", err)
+		fmt.Println("Error encoding and sending data:", err)
 		return
 	}
-	defer conn.Close()
+	fmt.Println("Enviei sinal a ", clientAddr)
+	//time.Sleep(5 * time.Second)
+	//abre porta de escrita para o cliente
+	redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+port)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	fmt.Println("Multicast server joined group", multicastAddr)
+	// Dial UDP for redirection client
+	redirConn, err := net.DialUDP("udp", nil, redirAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer redirConn.Close()
 
-	maxDatagramSize := 8192
-	conn.SetReadBuffer(maxDatagramSize)
-
-	// Loop forever reading from the socket
+	time.Sleep(5 * time.Second)
 	for {
-		buffer := make([]byte, maxDatagramSize)
-		numBytes, src, err := conn.ReadFromUDP(buffer)
-		if err != nil {
-			fmt.Println("Error reading:", err)
-			continue
-		}
+		// Receive data from the channel
+		data := <-dataChannel
+		//time.Sleep(1 * time.Second)
+		// Redirect data to client
 
-		fmt.Printf("Received %d bytes from %s: %s\n", numBytes, src, string(buffer[:numBytes]))
+		_, err = redirConn.Write(data)
+		if err != nil {
+			log.Fatal(err)
+		}
+		println("Sent to client ", clientAddr+":"+port)
 	}
+	select {}
+
 }
 
 func addNeighbours(array []string) {
@@ -622,6 +451,9 @@ func getFavNeighbour() (string, error) {
 	var bestip string
 
 	for ip, n := range neighboursTable {
+		if n.flag == 4 {
+			return ip, nil
+		}
 		if n.flag > best {
 			best = n.flag
 			bestip = ip
@@ -684,6 +516,8 @@ func saveFavNeighbour(pkt payload) {
 		neighboursTable[sender] = n
 		println("Guardei o vizinho ", sender)
 	}
+
+	floodUpdate++
 }
 
 func sendBack(pkt payload) {
@@ -783,7 +617,8 @@ func sendToNeighbours(ipNeighbour string, pkt packet) {
 
 	for n := range neighboursTable {
 		if n != ipNeighbour {
-			neighbourConn, erro := net.Dial("tcp", n+":8081")
+			timeoutDuration := 1 * time.Second
+			neighbourConn, erro := net.DialTimeout("tcp", n+":8081", timeoutDuration)
 			if erro != nil {
 				fmt.Println("Error:", erro)
 				return

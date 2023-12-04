@@ -78,8 +78,8 @@ node n5 {
 	!
     }
     canvas c1
-    iconcoords {946.0 283.0}
-    labelcoords {946.0 315.0}
+    iconcoords {947.0 283.0}
+    labelcoords {947.0 315.0}
     interface-peer {eth0 n9}
 }
 
