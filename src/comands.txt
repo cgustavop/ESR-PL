@@ -14,7 +14,15 @@ cd server/
 
 CLIENT:
 client/./client -ip "10.0.3.20" -o "10.0.3.1" -stream "trailer"
+client/./client -ip "10.0.7.20" -o "10.0.11.1" -stream "trailer"
+client/./client -ip "10.0.1.20" -o "10.0.0.1" -stream "trailer"
+client/./client -ip "10.0.0.20" -o "10.0.0.1" -stream "trailer"
 
 ffmpeg -stream_loop -1 -i trailer.mjpeg.avi -pix_fmt yuvj422p -s 640x360 -r 25 -c:v mjpeg -f mjpeg udp://10.0.3.20:8082
 
 ffplay udp://10.0.3.20:8082
+
+export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+export DISPLAY=:0.0
+
+ffplay udp://10.0.8.2:8000

@@ -39,7 +39,7 @@ var activeStreams int = 0
 var rpFlag bool
 var nodeAddr string
 var server string
-var format string = ".mjpeg.avi"
+var format string = ".mjpeg"
 
 func main() {
 	//neighboursTable = make(map[string]neighbour)
@@ -132,6 +132,23 @@ func streamFile(clientConn net.Conn, file string, clientAddr string) {
 	port, ok := fileAvailable[filePath]
 	if ok {
 
+		// encoder := gob.NewEncoder(clientConn)
+		// startSignal := packet{
+		// 	ReqType:     2,
+		// 	Description: port,
+		// 	Payload: payload{
+		// 		Sender: clientAddr,
+		// 	},
+		// }
+		// // Encode and send the array through the connection
+		// err := encoder.Encode(startSignal)
+		// if err != nil {
+		// 	fmt.Println("Error encoding and sending data:", err)
+		// 	return
+		// }
+		// fmt.Println("Enviei sinal a ", clientAddr)
+		go stream(filePath, port, clientAddr)
+		time.Sleep(2 * time.Second)
 		encoder := gob.NewEncoder(clientConn)
 		startSignal := packet{
 			ReqType:     2,
@@ -147,15 +164,6 @@ func streamFile(clientConn net.Conn, file string, clientAddr string) {
 			return
 		}
 		fmt.Println("Enviei sinal a ", clientAddr)
-
-		addr := "udp://" + clientAddr + ":" + port
-		cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", filePath, "-pix_fmt", "yuvj422p", "-s", "640x360", "-r", "25", "-c:v", "mjpeg", "-f", "mjpeg", addr)
-		err = cmd.Run()
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-		println("Sent to ", addr)
 
 	} else {
 		fmt.Println("File does not exist:", filePath)
@@ -177,6 +185,18 @@ func streamFile(clientConn net.Conn, file string, clientAddr string) {
 		fmt.Println("Enviei sinal de que o ficheiro não existe a ", clientAddr)
 	}
 
+}
+
+func stream(filePath string, port string, clientAddr string) {
+	println("Começando stream de ", filePath)
+	addr := "udp://" + clientAddr + ":" + port
+	println(addr)
+	cmd := exec.Command("ffmpeg", "-stream_loop", "-1", "-i", filePath, "-pix_fmt", "yuvj422p", "-s", "640x360", "-r", "25", "-c:v", "mjpeg", "-f", "mjpeg", addr)
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 }
 
 func debug() {

@@ -229,10 +229,11 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 		println("Não tenho stream de ", filePath)
 
 		// Shared channel to distribute received data to multiple goroutines
-		dataChannel := make(chan []byte)
+		dataChannel := make(chan []byte, 1024)
 		fileStreamsAvailable[filePath] = dataChannel
-		go requestStream(client, filePath, receivedPkt.Payload.Sender, dataChannel)
-		distributeData(client, receivedPkt.Payload.Sender, dataChannel)
+		requestStream(client, filePath, receivedPkt.Payload.Sender, dataChannel)
+		syncStream(dataChannel)
+		//distributeData(client, receivedPkt.Payload.Sender, dataChannel)
 
 	} else {
 		// invite client to join multicast group
@@ -242,27 +243,34 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 	}
 }
 
-func handshake(client net.Conn, filePath string, port string) {
-	// this should fetch the file details and put it onto the response packet
-	// fetchFileInfo(filePath)
-
-	response := packet{
-		ReqType:     2,
-		Description: port,
+func syncStream(dataChannel <-chan []byte) {
+	for range dataChannel {
+		// Discard received data
 	}
-
-	encoder := gob.NewEncoder(client)
-
-	// Encode and send the array through the connection
-	err := encoder.Encode(response)
-	if err != nil {
-		fmt.Println("[handshake] Error encoding and sending data:", err)
-		return
-	}
-	fmt.Println("Enviei informação sobre a stream a ", client.RemoteAddr().String())
 }
 
 func requestStream(clientConn net.Conn, filePath string, clientAddr string, dataChannel chan []byte) {
+
+	// Conta mais uma stream ativa e envia ao cliente a porta onde se poderá conectar
+	activeStreams++
+	portCalc := 8000 + activeStreams
+	portClient := strconv.Itoa(portCalc)
+	encoderClient := gob.NewEncoder(clientConn)
+	startSignal := packet{
+		ReqType:     2,
+		Description: portClient,
+		Payload: payload{
+			Sender: nodeAddr,
+		},
+	}
+	// Envia a porta
+	err := encoderClient.Encode(startSignal)
+	if err != nil {
+		fmt.Println("Error encoding and sending data:", err)
+		return
+	}
+	fmt.Println("Enviei porta a ", clientAddr)
+
 	request := packet{
 		ReqType:     1,
 		Description: filePath,
@@ -271,7 +279,6 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		},
 	}
 	// envia aos vizinho preferido
-	// getFavNeighbour() -> ip
 	neighbourIP, err := getFavNeighbour()
 	if err != nil {
 		println("Erro, vizinhos sem conexão: ", err)
@@ -291,10 +298,10 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		return
 	}
 	defer sourceConn.Close()
-	// espera resposta TCP
+
 	encoder := gob.NewEncoder(sourceConn)
 
-	// Encode and send the array through the connection
+	// Manda pedido de ficheiro
 	err = encoder.Encode(request)
 	if err != nil {
 		fmt.Println("Error encoding and sending data:", err)
@@ -302,25 +309,25 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 	}
 	fmt.Println("Enviei pedido a ", neighbourIP)
 
-	// info pacote (guarda na tabela)
-	var receivedData packet
+	// Recebe porta onde será transmitido
+	var srcPortInfoPacket packet
 	decoder := gob.NewDecoder(sourceConn)
-	err = decoder.Decode(&receivedData)
+	err = decoder.Decode(&srcPortInfoPacket)
 	if err != nil {
 		fmt.Println("Erro no decode da mensagem: ", err)
 		return
 	}
+	srcPort := srcPortInfoPacket.Description
 
-	println(receivedData.Description)
-	//sourceUDPaddr := neighbourIP + ":" + receivedData.Description
+	println(srcPortInfoPacket.Description)
 
-	if receivedData.Description == "404" {
+	if srcPortInfoPacket.Description == "404" {
+		activeStreams--
 		// avisa cliente/nodo atrás
-		port := "404"
 		encoder := gob.NewEncoder(clientConn)
 		noFileSignal := packet{
 			ReqType:     2,
-			Description: port,
+			Description: "404",
 			Payload: payload{
 				Sender: nodeAddr,
 			},
@@ -338,16 +345,25 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		//pronto para receber
 		// abre porta de leitura do servidor
 		// Resolve UDP address Server
-
-		var addr string
-		if rpFlag {
-			addr = nodeAddr + ":" + receivedData.Description
-
-		} else {
-			addr = nodeAddr + ":" + receivedData.Description
+		// envia confirmação se ficheiro será transmitido
+		confirmation := packet{
+			ReqType:     2,
+			Description: "200",
+			Payload: payload{
+				Sender: nodeAddr,
+			},
 		}
+		// Envia a porta
+		err := encoderClient.Encode(confirmation)
+		if err != nil {
+			fmt.Println("Error encoding and sending data:", err)
+			return
+		}
+		fmt.Println("Enviei confirmação a ", clientAddr)
 
-		srcAddr, err := net.ResolveUDPAddr("udp", addr)
+		srcAddrStr := nodeAddr + ":" + srcPort
+
+		srcAddr, err := net.ResolveUDPAddr("udp", srcAddrStr)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -359,34 +375,68 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		}
 		defer src.Close()
 
+		redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+portClient)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// if rpFlag {
+		// 	_, err = clientConn.Write([]byte("ACK"))
+		// 	if err != nil {
+		// 		fmt.Println("Error writing:", err)
+		// 		return
+		// 	}
+		// 	fmt.Println("Sent ACK to server")
+		// }
+
+		// Dial UDP for redirection client
+		redirConn, err := net.DialUDP("udp", nil, redirAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer redirConn.Close()
+
 		// Buffer to store incoming data
 		buf := make([]byte, 2048)
-		time.Sleep(5 * time.Second)
+
 		// Continuously read data from the connection and redirect it
-		buffer := make([]byte, 2048)
+		bufferCh := make([]byte, 2048)
 		for {
+
 			n, _, err := src.ReadFromUDP(buf)
 			if err != nil {
 				log.Fatal(err)
 			}
-			println("Received from source ", addr)
+			//println("Received from source ", addr)
+			copy(bufferCh[:n], buf[:n])
 
-			receivedData := make([]byte, n)
-			copy(receivedData, buffer[:n])
+			_, err = redirConn.Write(buf[:n])
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			select {
+			case dataChannel <- bufferCh[:n]:
+				continue
+				//fmt.Println("Data sent to channel")
+			default:
+				continue
+				//fmt.Println("Channel buffer full, dropping data")
+			}
+
+			//println("Sent to client ", clientAddr+":"+port)
+
+			//receivedData := make([]byte, n)
+			//copy(receivedData, buffer[:n])
 
 			// Send the received data to the channel for distribution
-			dataChannel <- receivedData
+			//dataChannel <- receivedData
 		}
 	}
 }
 
 func distributeData(clientConn net.Conn, clientAddr string, dataChannel <-chan []byte) {
 
-	_, ok := <-dataChannel
-	if !ok {
-		fmt.Println("Channel closed before receiving anything. Ficheiro não existe.")
-		return
-	}
 	activeStreams++
 	portCalc := 8000 + activeStreams
 	port := strconv.Itoa(portCalc)
@@ -405,7 +455,7 @@ func distributeData(clientConn net.Conn, clientAddr string, dataChannel <-chan [
 		return
 	}
 	fmt.Println("Enviei sinal a ", clientAddr)
-	//time.Sleep(5 * time.Second)
+	time.Sleep(5 * time.Second)
 	//abre porta de escrita para o cliente
 	redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+port)
 	if err != nil {
@@ -418,8 +468,6 @@ func distributeData(clientConn net.Conn, clientAddr string, dataChannel <-chan [
 		log.Fatal(err)
 	}
 	defer redirConn.Close()
-
-	time.Sleep(5 * time.Second)
 	for {
 		// Receive data from the channel
 		data := <-dataChannel
@@ -430,9 +478,9 @@ func distributeData(clientConn net.Conn, clientAddr string, dataChannel <-chan [
 		if err != nil {
 			log.Fatal(err)
 		}
-		println("Sent to client ", clientAddr+":"+port)
+
+		//println("Sent to client ", clientAddr+":"+port)
 	}
-	select {}
 
 }
 

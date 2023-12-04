@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"os/exec"
 	"time"
 )
@@ -79,25 +78,31 @@ func getStream() {
 	}
 
 	println(receivedData.Description)
-	//sourceUDPaddr := receivedData.Payload.Sender + ":" + receivedData.Description
 	sourceUDPaddr := nodeAddr + ":" + receivedData.Description
-	//sourceUDPaddr := nodeAddr + ":" + "8000"
-
-	// Create a file to store the output
-	outputFile, err := os.Create("debug.txt")
+	cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
+	err = cmd.Run()
 	if err != nil {
-		fmt.Println("Error creating output file:", err)
+		log.Fatal(err)
 	}
-	defer outputFile.Close()
 
-	if receivedData.Description == "404" {
-		fmt.Println("FICHEIRO NÃO EXISTE")
-	} else {
-		cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
-		cmd.Stdout = outputFile
-		err := cmd.Run()
-		if err != nil {
-			log.Fatal(err)
-		}
+	// confirmação de stream
+	var confirmation packet
+	decoder = gob.NewDecoder(sourceConn)
+	err = decoder.Decode(&confirmation)
+	if err != nil {
+		fmt.Println("Erro no decode da mensagem: ", err)
+		return
 	}
+
+	if confirmation.Description == "404" {
+		fmt.Println("FICHEIRO NÃO EXISTE")
+		err = cmd.Process.Kill()
+		if err != nil {
+			fmt.Println("Error killing process:", err)
+			return
+		}
+
+		fmt.Println("Command terminated")
+	}
+
 }
