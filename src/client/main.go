@@ -69,7 +69,7 @@ func getStream() {
 		fmt.Println("Error encoding and sending data:", err)
 		return
 	}
-	fmt.Println("Enviei pedido de stream a ", overlayAddr)
+	fmt.Println("Pedido de stream enviado a ", overlayAddr)
 
 	// info pacote (guarda na tabela)
 	var receivedData packet
@@ -80,9 +80,12 @@ func getStream() {
 		return
 	}
 
-	println(receivedData.Description)
 	sourceUDPaddr := nodeAddr + ":" + receivedData.Description
-
+	cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
+	err = cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
 	terminate := make(chan struct{})
 
 	// Handle interrupt signal (e.g., Ctrl+C) to gracefully terminate the program
@@ -96,24 +99,24 @@ func getStream() {
 		fmt.Println("Error encoding and sending data:", err)
 		return
 	}
-	fmt.Println("Ready signal enviado a ", overlayAddr)
+	//log.Println("Ready signal enviado a ", overlayAddr)
 
 	// confirmação de stream
 	var confirmation packet
 	err = decoder.Decode(&confirmation)
 	if err != nil {
-		fmt.Println("Erro no decode da mensagem: ", err)
+		log.Println("Erro no decode da mensagem: ", err)
 		return
 	}
 
 	if confirmation.Description == "404" {
-		fmt.Println("FICHEIRO NÃO EXISTE")
+		fmt.Println("Ficheiro não existe")
 		<-sigCh
 		close(terminate)
 	} else {
-		println("Ficheiro existe")
+		fmt.Println("Iniciando stream")
 	}
-
+	select {}
 }
 
 func stream(addr string, terminate <-chan struct{}) {
