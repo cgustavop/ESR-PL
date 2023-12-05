@@ -317,7 +317,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		ReqType:     1,
 		Description: filePath,
 		Payload: payload{
-			Sender: nodeAddr,
+			Sender: nodeAddr + ":" + portClient,
 		},
 	}
 	// envia aos vizinho preferido
@@ -370,7 +370,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		safeExit("500", clientConn, dataChannel, filePath, clientAddr)
 		return
 	}
-	srcPort := srcPortInfoPacket.Description
+	//srcPort := srcPortInfoPacket.Description
 	if srcPortInfoPacket.Description == "500" {
 		safeExit("500", clientConn, dataChannel, filePath, clientAddr)
 		return
@@ -397,7 +397,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		}
 		log.Println("Enviei confirmação da stream a ", clientAddr)
 
-		srcAddrStr := nodeAddr + ":" + srcPort
+		srcAddrStr := nodeAddr + ":" + portClient
 
 		srcAddr, err := net.ResolveUDPAddr("udp", srcAddrStr)
 		if err != nil {
@@ -411,7 +411,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 		}
 		defer src.Close()
 
-		redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+portClient)
+		redirAddr, err := net.ResolveUDPAddr("udp", clientAddr)
 		if err != nil {
 			log.Println(err)
 		}
@@ -643,7 +643,7 @@ func requestStreamRP(clientConn net.Conn, filePath string, clientAddr string, da
 		}
 		defer src.Close()
 
-		redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+portClient)
+		redirAddr, err := net.ResolveUDPAddr("udp", clientAddr)
 		if err != nil {
 			log.Println(err)
 		}
@@ -678,6 +678,7 @@ func requestStreamRP(clientConn net.Conn, filePath string, clientAddr string, da
 					streamViewers[filePath] -= 1
 					if streamViewers[filePath] == 0 {
 						log.Printf("Stream %s sem viewers, fechando transmissão...", filePath)
+						activeStreams--
 						close(dataChannel)
 						delete(fileStreamsAvailable, filePath)
 						return
@@ -707,7 +708,8 @@ func distributeData(clientConn net.Conn, encoder *gob.Encoder, clientAddr string
 	}
 
 	//abre porta de escrita para o cliente
-	redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+port)
+	println(clientAddr)
+	redirAddr, err := net.ResolveUDPAddr("udp", clientAddr)
 	if err != nil {
 		log.Println(err)
 		return

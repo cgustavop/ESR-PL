@@ -28,6 +28,7 @@ type payload struct {
 var nodeAddr string
 var overlayAddr string
 var filePath string
+var port string = "8000"
 
 func main() {
 
@@ -36,8 +37,10 @@ func main() {
 	flag.StringVar(&filePath, "stream", "", "requests a stream for the given file")
 	flag.Parse()
 
-	getStream()
+	go stream(nodeAddr + ":" + port)
 
+	getStream()
+	select {}
 }
 
 func getStream() {
@@ -46,7 +49,7 @@ func getStream() {
 		ReqType:     1,
 		Description: filePath,
 		Payload: payload{
-			Sender: nodeAddr,
+			Sender: nodeAddr + ":" + port,
 		},
 	}
 
@@ -60,7 +63,7 @@ func getStream() {
 	// espera resposta TCP
 	encoder := gob.NewEncoder(sourceConn)
 
-	// Encode and send the array through the connection
+	// Encode and send the request through the connection
 	err := encoder.Encode(request)
 	if err != nil {
 		fmt.Println("Error encoding and sending data:", err)
@@ -83,28 +86,31 @@ func getStream() {
 		fmt.Println("Falha interna do Overlay")
 	} else {
 		fmt.Println("Iniciando stream")
-		sourceUDPaddr := nodeAddr + ":" + confirmation.Description
-		cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
-		err = cmd.Run()
-		if err != nil {
-			log.Fatal(err)
-		}
 	}
 }
 
-func stream(addr string, terminate <-chan struct{}) {
+// func stream(addr string, terminate <-chan struct{}) {
+// 	cmd := exec.Command("ffplay", "udp://"+addr)
+// 	err := cmd.Run()
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+
+// 	select {
+// 	case <-terminate: // If termination signal received
+// 		err := cmd.Process.Kill()
+// 		if err != nil {
+// 			fmt.Println("Error killing process:", err)
+// 		}
+// 		fmt.Println("Command terminated")
+// 	}
+// }
+
+func stream(addr string) {
 	cmd := exec.Command("ffplay", "udp://"+addr)
 	err := cmd.Run()
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	select {
-	case <-terminate: // If termination signal received
-		err := cmd.Process.Kill()
-		if err != nil {
-			fmt.Println("Error killing process:", err)
-		}
-		fmt.Println("Command terminated")
+		log.Println(err)
+		return
 	}
 }
