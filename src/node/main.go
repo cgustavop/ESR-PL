@@ -139,7 +139,7 @@ func main() {
 func setup() {
 	conn, erro := net.Dial("tcp", bootstrapperAddr+":8080")
 	if erro != nil {
-		fmt.Println("Error:", erro)
+		//fmt.Println("Error:", erro)
 		ducktape()
 		return
 	}
@@ -232,14 +232,40 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 		dataChannel := make(chan []byte, 1024)
 		fileStreamsAvailable[filePath] = dataChannel
 		requestStream(client, filePath, receivedPkt.Payload.Sender, dataChannel)
-		syncStream(dataChannel)
+		//syncStream(dataChannel)
 		//distributeData(client, receivedPkt.Payload.Sender, dataChannel)
 
 	} else {
 		// invite client to join multicast group
 		println("Stream já existe, redirecionando cliente...")
-		//redirectClient(client, strconv.Itoa(streamPort), filePath)
-		distributeData(client, receivedPkt.Payload.Sender, dataChannel)
+		//envia porta
+		clientAddr := receivedPkt.Payload.Sender
+		activeStreams++
+		portCalc := 8000 + activeStreams
+		port := strconv.Itoa(portCalc)
+		encoder := gob.NewEncoder(client)
+		startSignal := packet{
+			ReqType:     2,
+			Description: port,
+			Payload: payload{
+				Sender: nodeAddr,
+			},
+		}
+		// Envia a porta onde irá fazer stream
+		err := encoder.Encode(startSignal)
+		if err != nil {
+			fmt.Println("Error encoding and sending data:", err)
+			return
+		}
+		fmt.Println("Enviei sinal a ", clientAddr)
+
+		//cliente avisa se está pronto
+		decoder := gob.NewDecoder(client)
+		// Envia a porta onde irá fazer stream
+		var ready packet
+		err = decoder.Decode(&ready)
+
+		distributeData(client, encoder, receivedPkt.Payload.Sender, port, dataChannel)
 	}
 }
 
@@ -353,7 +379,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 				Sender: nodeAddr,
 			},
 		}
-		// Envia a porta
+		// Envia a confirmação
 		err := encoderClient.Encode(confirmation)
 		if err != nil {
 			fmt.Println("Error encoding and sending data:", err)
@@ -435,38 +461,36 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 	}
 }
 
-func distributeData(clientConn net.Conn, clientAddr string, dataChannel <-chan []byte) {
+func distributeData(clientConn net.Conn, encoder *gob.Encoder, clientAddr string, port string, dataChannel <-chan []byte) {
 
-	activeStreams++
-	portCalc := 8000 + activeStreams
-	port := strconv.Itoa(portCalc)
-	encoder := gob.NewEncoder(clientConn)
-	startSignal := packet{
+	confirmation := packet{
 		ReqType:     2,
-		Description: port,
+		Description: "200",
 		Payload: payload{
 			Sender: nodeAddr,
 		},
 	}
-	// Encode and send the array through the connection
-	err := encoder.Encode(startSignal)
-	if err != nil {
-		fmt.Println("Error encoding and sending data:", err)
-		return
-	}
-	fmt.Println("Enviei sinal a ", clientAddr)
-	time.Sleep(5 * time.Second)
+
 	//abre porta de escrita para o cliente
 	redirAddr, err := net.ResolveUDPAddr("udp", clientAddr+":"+port)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	// Dial UDP for redirection client
 	redirConn, err := net.DialUDP("udp", nil, redirAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Envia a porta onde irá fazer stream
+	err = encoder.Encode(confirmation)
+	if err != nil {
+		fmt.Println("Error encoding and sending data:", err)
+		return
+	}
+
+	time.Sleep(5 * time.Second)
+
 	defer redirConn.Close()
 	for {
 		// Receive data from the channel

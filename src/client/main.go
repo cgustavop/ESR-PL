@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -79,15 +82,24 @@ func getStream() {
 
 	println(receivedData.Description)
 	sourceUDPaddr := nodeAddr + ":" + receivedData.Description
-	cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
-	err = cmd.Run()
+
+	terminate := make(chan struct{})
+
+	// Handle interrupt signal (e.g., Ctrl+C) to gracefully terminate the program
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	go stream(sourceUDPaddr, terminate)
+
+	err = encoder.Encode(request)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("Error encoding and sending data:", err)
+		return
 	}
+	fmt.Println("Ready signal enviado a ", overlayAddr)
 
 	// confirmação de stream
 	var confirmation packet
-	decoder = gob.NewDecoder(sourceConn)
 	err = decoder.Decode(&confirmation)
 	if err != nil {
 		fmt.Println("Erro no decode da mensagem: ", err)
@@ -96,13 +108,27 @@ func getStream() {
 
 	if confirmation.Description == "404" {
 		fmt.Println("FICHEIRO NÃO EXISTE")
-		err = cmd.Process.Kill()
-		if err != nil {
-			fmt.Println("Error killing process:", err)
-			return
-		}
-
-		fmt.Println("Command terminated")
+		<-sigCh
+		close(terminate)
+	} else {
+		println("Ficheiro existe")
 	}
 
+}
+
+func stream(addr string, terminate <-chan struct{}) {
+	cmd := exec.Command("ffplay", "udp://"+addr)
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	select {
+	case <-terminate: // If termination signal received
+		err := cmd.Process.Kill()
+		if err != nil {
+			fmt.Println("Error killing process:", err)
+		}
+		fmt.Println("Command terminated")
+	}
 }
