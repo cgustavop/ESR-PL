@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -93,7 +92,7 @@ func setup() {
 		}
 
 		//filePath := file.Name()
-		filePath := filepath.Join(server, file.Name())
+		filePath := file.Name()
 		println("[setup] Added file ", filePath)
 		port := strconv.Itoa(8000 + activeStreams)
 		fileAvailable[filePath] = port
@@ -124,12 +123,26 @@ func handleRequest(client net.Conn) {
 	case 3:
 		// control packets
 		println("Control Packet received")
+		sendFileList(client)
+	}
+}
+
+func sendFileList(clientConn net.Conn) {
+	fileList := []string{}
+	for f, _ := range fileAvailable {
+		fileList = append(fileList, f)
+	}
+	encoder := gob.NewEncoder(clientConn)
+	err := encoder.Encode(fileList)
+	if err != nil {
+		log.Printf("Erro a enviar listagem de ficheiros ao RP")
+		return
 	}
 }
 
 func streamFile(clientConn net.Conn, file string, clientAddr string) {
+	port, ok := fileAvailable[file+format]
 	filePath := server + "/" + file + format
-	port, ok := fileAvailable[filePath]
 	if ok {
 
 		// encoder := gob.NewEncoder(clientConn)

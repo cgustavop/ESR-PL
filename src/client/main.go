@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -72,37 +69,8 @@ func getStream() {
 	fmt.Println("Pedido de stream enviado a ", overlayAddr)
 
 	// info pacote (guarda na tabela)
-	var receivedData packet
-	decoder := gob.NewDecoder(sourceConn)
-	err = decoder.Decode(&receivedData)
-	if err != nil {
-		fmt.Println("Erro no decode da mensagem: ", err)
-		return
-	}
-
-	sourceUDPaddr := nodeAddr + ":" + receivedData.Description
-	cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
-	err = cmd.Run()
-	if err != nil {
-		log.Fatal(err)
-	}
-	terminate := make(chan struct{})
-
-	// Handle interrupt signal (e.g., Ctrl+C) to gracefully terminate the program
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	go stream(sourceUDPaddr, terminate)
-
-	err = encoder.Encode(request)
-	if err != nil {
-		fmt.Println("Error encoding and sending data:", err)
-		return
-	}
-	//log.Println("Ready signal enviado a ", overlayAddr)
-
-	// confirmação de stream
 	var confirmation packet
+	decoder := gob.NewDecoder(sourceConn)
 	err = decoder.Decode(&confirmation)
 	if err != nil {
 		log.Println("Erro no decode da mensagem: ", err)
@@ -111,12 +79,17 @@ func getStream() {
 
 	if confirmation.Description == "404" {
 		fmt.Println("Ficheiro não existe")
-		<-sigCh
-		close(terminate)
+	} else if confirmation.Description == "500" {
+		fmt.Println("Falha interna do Overlay")
 	} else {
 		fmt.Println("Iniciando stream")
+		sourceUDPaddr := nodeAddr + ":" + confirmation.Description
+		cmd := exec.Command("ffplay", "udp://"+sourceUDPaddr)
+		err = cmd.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-	select {}
 }
 
 func stream(addr string, terminate <-chan struct{}) {
