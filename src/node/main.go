@@ -279,7 +279,7 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 
 	dataChannel := make(chan []byte, 1024)
 	activeStreams++
-	_, ok := fileStreamsAvailable[filePath]
+	ok := len(fileStreamsAvailable[filePath]) > 0
 	if ok {
 		newStream := stream{
 			channel: dataChannel,
@@ -293,13 +293,13 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 		clientUDP, err := handshake(client, clientAddr, "200")
 		if err != nil {
 			log.Println("cliente UDP not ready")
-			deleteStreamEntry(filePath, clientAddr)
+			go deleteStreamEntry(filePath, clientAddr)
 			streamViewers[filePath] -= 1
 			activeStreams--
 			return
 		}
 		retransmit(clientUDP, filePath, dataChannel)
-		deleteStreamEntry(filePath, clientAddr)
+		go deleteStreamEntry(filePath, clientAddr)
 		streamViewers[filePath] -= 1
 		activeStreams--
 	} else {
@@ -318,15 +318,14 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 		clientUDP, err := handshake(client, clientAddr, status)
 		if err != nil {
 			log.Println("cliente UDP not ready")
-			close(dataChannel)
+			go deleteStreamEntry(filePath, clientAddr)
 			activeStreams--
 			return
 		}
 		retransmit(clientUDP, filePath, dataChannel)
 		streamViewers[filePath] -= 1
 		activeStreams--
-		deleteStreamEntry(filePath, clientAddr)
-		return
+		go deleteStreamEntry(filePath, clientAddr)
 	}
 
 }
@@ -337,9 +336,17 @@ func deleteStreamEntry(key string, id string) {
 	for i, stream := range streams {
 		if stream.client == id {
 			// Delete the stream from the slice
-			close(stream.channel)
 			fileStreamsAvailable[key] = append(streams[:i], streams[i+1:]...)
-			return
+			for {
+				select {
+				case _, ok := <-stream.channel:
+					if !ok {
+						// Channel closed, all data flushed
+						close(stream.channel)
+						return
+					}
+				}
+			}
 		}
 	}
 }
@@ -391,7 +398,7 @@ func retransmit(clientUDPConn *net.UDPConn, filePath string, dataChannel chan []
 
 		_, err := clientUDPConn.Write(data)
 		if err != nil {
-			log.Println(err)
+			log.Println("CLIENTE FECHOU CONEXÃO", err)
 			return
 		}
 
@@ -516,6 +523,8 @@ func getStream(clientConn net.Conn, filePath string, clientAddr string, statusCh
 				log.Println("No one's connected. Closing stream", filePath)
 				return
 			}
+			buf = []byte{}
+			buf = make([]byte, 2048)
 		}
 	}
 }
