@@ -38,6 +38,7 @@ func main() {
 	flag.Parse()
 
 	go stream(nodeAddr + ":" + port)
+	time.Sleep(1 * time.Second)
 
 	getStream()
 	select {}

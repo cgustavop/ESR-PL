@@ -446,6 +446,7 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 					streamViewers[filePath] -= 1
 					if streamViewers[filePath] == 0 {
 						log.Printf("Stream %s sem viewers, fechando transmissão...", filePath)
+						activeStreams--
 						close(dataChannel)
 						delete(fileStreamsAvailable, filePath)
 						return
@@ -454,12 +455,12 @@ func requestStream(clientConn net.Conn, filePath string, clientAddr string, data
 			}
 
 			// para manter o channel ativo
-			select {
-			case dataChannel <- bufferCh[:n]:
-				continue
-			default:
-				continue
-			}
+			// select {
+			// case dataChannel <- bufferCh[:n]:
+			// 	continue
+			// default:
+			// 	continue
+			// }
 		}
 	}
 }
@@ -686,13 +687,13 @@ func requestStreamRP(clientConn net.Conn, filePath string, clientAddr string, da
 				}
 			}
 
-			// para manter o channel ativo
-			select {
-			case dataChannel <- bufferCh[:n]:
-				continue
-			default:
-				continue
-			}
+			// // para manter o channel ativo
+			// select {
+			// case dataChannel <- bufferCh[:n]:
+			// 	continue
+			// default:
+			// 	continue
+			// }
 		}
 	}
 }
