@@ -53,6 +53,8 @@ func main() {
 	//go debug()
 	setup()
 
+	go monitor()
+
 	// à escuta de pedidos
 	listener, erro := net.Listen("tcp", nodeAddr+":8081")
 	if erro != nil {
@@ -91,12 +93,15 @@ func setup() {
 			continue
 		}
 
-		//filePath := file.Name()
 		filePath := file.Name()
-		println("[setup] Added file ", filePath)
 		port := strconv.Itoa(8000 + activeStreams)
-		fileAvailable[filePath] = port
-		activeStreams++
+		_, ok := fileAvailable[filePath]
+		if !ok {
+			println("[setup] Added file ", filePath)
+			fileAvailable[filePath] = port
+			activeStreams++
+		}
+
 	}
 }
 
@@ -197,14 +202,15 @@ func stream(filePath string, port string, clientAddr string) {
 }
 
 func debug() {
-	//for {
-	//	fmt.Printf("[DEBUG]----------\n%d active streams\n-----------------\n", activeStreams)
-	//	fmt.Printf("%v\n", fileStreamsAvailable)
-	//	time.Sleep(20 * time.Second)
-	//}
 	for {
 		fmt.Printf("[DEBUG]----------\n%d ACTIVE STREAMS \n-----------------\n", activeStreams)
 		fmt.Printf("%v\n", activeStreams)
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func monitor() {
+	println("Monitoring files...")
+	time.Sleep(10 * time.Second)
+	setup()
 }

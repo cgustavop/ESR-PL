@@ -90,6 +90,10 @@ func main() {
 	// faz pedido ao bootstrapper e guarda vizinhos
 	setup()
 
+	if rpFlag {
+		go monitor()
+	}
+
 	// à escuta de pedidos de outros nodos
 	listener, erro := net.Listen("tcp", nodeAddr+":8081")
 	if erro != nil {
@@ -407,6 +411,7 @@ func source(filePath string) string {
 		ip = chooseSource(filePath)
 		return ip
 	} else {
+		flood()
 		try := 3
 		for {
 			ip, err := getFavNeighbour()
@@ -415,7 +420,7 @@ func source(filePath string) string {
 			} else if try == 0 {
 				return ""
 			} else {
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 				flood()
 			}
 			try--
@@ -446,7 +451,7 @@ func getStream(clientConn net.Conn, filePath string, clientAddr string, statusCh
 	sourceConn, errCon := net.Dial("tcp", ip+":8081")
 	if errCon != nil {
 		log.Println("Erro a estabelecer conexão com a source:", errCon)
-		statusChannel <- "500"
+		statusChannel <- "404"
 		return
 	}
 	defer sourceConn.Close()
@@ -596,7 +601,7 @@ func getServerFileList(serverAddr string, wg *sync.WaitGroup) {
 		return
 	}
 	defer sourceConn.Close()
-
+	startTime := time.Now()
 	encoder := gob.NewEncoder(sourceConn)
 
 	// Manda pedido de lista de ficheiros
@@ -610,8 +615,17 @@ func getServerFileList(serverAddr string, wg *sync.WaitGroup) {
 	availableFiles := []string{}
 	decoder := gob.NewDecoder(sourceConn)
 	decoder.Decode(&availableFiles)
+	rtt := time.Since(startTime)
 	fmt.Printf("%v\n", availableFiles)
 	serverTable[serverAddr] = availableFiles
+	update := neighbour{
+		flag:    4,
+		latency: int(rtt),
+	}
+	if changeNeighbourMetric(update, serverAddr) {
+		neighboursTable[serverAddr] = update
+		log.Println("Updating server", serverAddr, "metrics")
+	}
 }
 
 func addNeighbours(info bootstrapper.NodeInfo) {
@@ -734,8 +748,8 @@ func sendBack(pkt payload) {
 		ReqType: 0,
 		Payload: response,
 	}
-
-	neighbourConn, erro := net.Dial("tcp", neighbourIp+":8081")
+	timeout := 1 * time.Second
+	neighbourConn, erro := net.DialTimeout("tcp", neighbourIp+":8081", timeout)
 	if erro != nil {
 		log.Println(erro)
 		return
@@ -807,6 +821,8 @@ func sendToNeighbours(ipNeighbour string, pkt packet) {
 
 	for n := range neighboursTable {
 		if n != ipNeighbour {
+			println(n)
+			println(ipNeighbour)
 			timeoutDuration := 1 * time.Second
 			neighbourConn, erro := net.DialTimeout("tcp", n+":8081", timeoutDuration)
 			if erro != nil {
@@ -846,4 +862,10 @@ func flood() {
 	}
 
 	sendToNeighbours("", pkt)
+}
+
+func monitor() {
+	time.Sleep(20 * time.Second)
+	log.Println("Monitoring servers...")
+	updateServerFileList()
 }
