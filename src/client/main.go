@@ -72,7 +72,7 @@ func getStream() {
 	}
 	fmt.Println("Pedido de stream enviado a ", overlayAddr)
 
-	// info pacote (guarda na tabela)
+	// pacote confirmação
 	var confirmation packet
 	decoder := gob.NewDecoder(sourceConn)
 	err = decoder.Decode(&confirmation)

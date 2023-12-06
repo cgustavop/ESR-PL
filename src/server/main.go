@@ -144,22 +144,6 @@ func streamFile(clientConn net.Conn, file string, clientAddr string) {
 	port, ok := fileAvailable[file+format]
 	filePath := server + "/" + file + format
 	if ok {
-
-		// encoder := gob.NewEncoder(clientConn)
-		// startSignal := packet{
-		// 	ReqType:     2,
-		// 	Description: port,
-		// 	Payload: payload{
-		// 		Sender: clientAddr,
-		// 	},
-		// }
-		// // Encode and send the array through the connection
-		// err := encoder.Encode(startSignal)
-		// if err != nil {
-		// 	fmt.Println("Error encoding and sending data:", err)
-		// 	return
-		// }
-		// fmt.Println("Enviei sinal a ", clientAddr)
 		go stream(filePath, port, clientAddr)
 		time.Sleep(2 * time.Second)
 		encoder := gob.NewEncoder(clientConn)
