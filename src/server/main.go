@@ -27,7 +27,7 @@ type payload struct {
 	HourIn        time.Time
 	AllNodes      []string
 	BacktraceSize int
-	TotalTime     int //ms
+	TotalTime     float64 //ms
 }
 
 // Maps "filePath" to the port where it will be streamed
@@ -124,8 +124,6 @@ func handleRequest(client net.Conn) {
 		println("Stream Request received for ", receivedData.Description)
 		streamFile(client, receivedData.Description, receivedData.Payload.Sender)
 	case 2:
-		// recebe resposta a pedido
-	case 3:
 		// control packets
 		println("Control Packet received")
 		sendFileList(client)

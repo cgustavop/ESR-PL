@@ -1,12 +1,11 @@
 RP e BS:
-cd node
-./node -ip "10.0.11.1" -rp -s "10.0.5.10"
+node/./node -ip "10.0.11.1" -rp -tree "cenario4.json"
 
 NODOS:
-node/./node -ip "10.0.0.1" -bs "10.0.11.1"
-node/./node -ip "10.0.3.1" -bs "10.0.11.1"
-node/./node -ip "10.0.4.2" -bs "10.0.11.1"
-node/./node -ip "10.0.8.2" -bs "10.0.11.1"
+n7 node/./node -ip "10.0.0.1" -bs "10.0.11.1"
+n8 node/./node -ip "10.0.3.1" -bs "10.0.11.1"
+n9 node/./node -ip "10.0.4.2" -bs "10.0.11.1"
+n11 node/./node -ip "10.0.8.2" -bs "10.0.11.1"
 
 SERVER:
 cd server/
@@ -14,15 +13,16 @@ cd server/
 ./server -ip "10.0.10.10" -s "server2"
 
 CLIENT:
-client/./client -ip "10.0.3.20" -o "10.0.3.1" -stream "trailer"
-client/./client -ip "10.0.7.20" -o "10.0.11.1" -stream "trailer"
-client/./client -ip "10.0.1.20" -o "10.0.0.1" -stream "trailer"
-client/./client -ip "10.0.0.20" -o "10.0.0.1" -stream "trailer"
+n1 client/./client -ip "10.0.3.20" -o "10.0.3.1" -stream "1917"
+n2 client/./client -ip "10.0.7.20" -o "10.0.11.1" -stream "trailer"
+n4 client/./client -ip "10.0.1.20" -o "10.0.0.1" -stream "movie"
+n3 client/./client -ip "10.0.0.20" -o "10.0.0.1" -stream "trailer"
 
 
-xhost +
-export DISPLAY=:0.0
-export GOROOT=/usr/local/go
-export GOPATH=$HOME/go
-export PATH=$GOPATH/bin:$GOROOT/bin:$PATH
-source ~/.profile
+xhost + &&
+export DISPLAY=:0.0 &&
+export GOROOT=/usr/local/go &&
+export GOPATH=$HOME/go &&
+export PATH=$GOPATH/bin:$GOROOT/bin:$PATH &&
+source ~/.profile &&
+sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"

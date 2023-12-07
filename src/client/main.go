@@ -22,7 +22,7 @@ type payload struct {
 	HourIn        time.Time
 	AllNodes      []string
 	BacktraceSize int
-	TotalTime     int //ms
+	TotalTime     float64 //ms
 }
 
 var nodeAddr string
@@ -57,7 +57,7 @@ func getStream() {
 	// connect TCP (ip)
 	sourceConn, erro := net.Dial("tcp", overlayAddr+":8081")
 	if erro != nil {
-		fmt.Println("Error:", erro)
+		fmt.Println("Erro a contactar overlay:", erro)
 		return
 	}
 	defer sourceConn.Close()

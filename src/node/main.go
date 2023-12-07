@@ -13,14 +13,17 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/fatih/color"
+	"github.com/go-ping/ping"
 )
 
 var ErrNoFavNeighbours = errors.New("No favourite neighbour found")
 
 type neighbour struct {
 	flag    int
-	latency int
-	loss    int
+	latency float64
+	loss    float64
 }
 
 // pacote
@@ -39,7 +42,7 @@ type payload struct {
 	HourIn        time.Time
 	AllNodes      []string
 	BacktraceSize int
-	TotalTime     int //ms
+	TotalTime     float64 //ms
 }
 
 // Maps the neighbour's IP to it's related info (type flag, latency, loss)
@@ -58,6 +61,7 @@ var nodeAddr string
 var serverAddr string
 var floodUpdate int = 0
 var format string = ".mjpeg"
+var bsFile string
 
 func main() {
 	neighboursTable = make(map[string]neighbour)
@@ -69,6 +73,7 @@ func main() {
 	flag.BoolVar(&rpFlag, "rp", false, "sets the node as the overlay's Rendezvous Point")
 	flag.StringVar(&serverAddr, "s", "", "sets the server wich the RP has connection to")
 	flag.StringVar(&nodeAddr, "ip", "", "sets the node ip")
+	flag.StringVar(&bsFile, "tree", "", "bootstrapper's nodes list")
 
 	var debugFlag bool
 	flag.BoolVar(&debugFlag, "d", true, "switch debug (default true)")
@@ -77,7 +82,7 @@ func main() {
 
 	if bootstrapperAddr == "" {
 		// corre bootstrapper em segundo plano
-		go bootstrapper.Run(nodeAddr)
+		go bootstrapper.Run(nodeAddr, bsFile)
 		bootstrapperAddr = nodeAddr
 	}
 
@@ -94,6 +99,7 @@ func main() {
 		go monitor()
 	}
 
+	//go control()
 	// à escuta de pedidos de outros nodos
 	listener, erro := net.Listen("tcp", nodeAddr+":8081")
 	if erro != nil {
@@ -122,7 +128,7 @@ func setup() {
 	conn, erro := net.Dial("tcp", bootstrapperAddr+":8080")
 	if erro != nil {
 		// problema na comunicação por localhost no xubuntu core
-		nodes, servers := bootstrapper.LocalBS(nodeAddr)
+		nodes, servers := bootstrapper.LocalBS(nodeAddr, bsFile)
 		nodeinfo := bootstrapper.NodeInfo{
 			Nodes:   nodes,
 			Servers: servers,
@@ -173,8 +179,8 @@ func debug() {
 			case 4:
 				fmt.Printf("SERVIDOR\n")
 			}
-			fmt.Printf("Latency: %d\n", neighbour.latency)
-			fmt.Printf("Loss: %d\n", neighbour.loss)
+			fmt.Printf("Latency: %.2fms\n", neighbour.latency)
+			fmt.Printf("Loss: %.2f%%\n", neighbour.loss)
 			fmt.Println("---------------------------")
 		}
 		fmt.Println()
@@ -198,85 +204,75 @@ func handleRequest(client net.Conn) {
 	switch receivedData.ReqType {
 	case 0:
 		//flood protocol
-		log.Println("Flood Packet de ", receivedData.Payload.Sender)
+		color.Blue("Flood Packet de " + receivedData.Payload.Sender)
 		if rpFlag {
 			floodPivotPoint(receivedData.Payload)
 		} else {
 			floodRetransmit(receivedData.Payload)
 		}
 	case 1:
-		log.Printf("Stream Request de %v por %v", receivedData.Description, receivedData.Payload.Sender)
+		color.Blue("Stream Request de " + receivedData.Description + " por " + receivedData.Payload.Sender)
 		streamRequest(client, receivedData)
 		//streamFile(client, "8888", "teste")
 		// abre multicast e faz stream
 	case 2:
-		// recebe resposta a pedido
-		log.Println("Response Packet de ", receivedData.Payload.Sender)
-	case 3:
-		// control packets
+		// recebe control packets
 		log.Println("Control Packet received")
+		//control()
 	}
 }
 
-/*
-	func streamRequestOld(client net.Conn, receivedPkt packet) {
-		filePath := receivedPkt.Description
-		dataChannel, ok := fileStreamsAvailable[filePath]
-		if !ok {
-			// se stream não existe faz request a vizinho
-			log.Println("Não tenho stream de ", filePath)
+func control() {
 
-			// abre um canal para redistribuir futuros pedidos
-			dataChannel := make(chan []byte, 1024)
-			streamViewers[filePath] = 1
-			fileStreamsAvailable[filePath] = dataChannel
-			if !rpFlag {
-				requestStream(client, filePath, receivedPkt.Payload.Sender, dataChannel)
-			} else {
-				requestStreamRP(client, filePath, receivedPkt.Payload.Sender, dataChannel)
-			}
-		} else {
-			log.Println("Stream já existe, redirecionando cliente")
-			streamViewers[filePath] += 1
-			//envia porta para onde será enviada a stream
-			clientAddr := receivedPkt.Payload.Sender
-			activeStreams++
-			portCalc := 8000 + activeStreams
-			port := strconv.Itoa(portCalc)
-			encoder := gob.NewEncoder(client)
-			startSignal := packet{
-				ReqType:     2,
-				Description: port,
-				Payload: payload{
-					Sender: nodeAddr,
-				},
-			}
+	time.Sleep(30 * time.Second)
+	for target, n := range neighboursTable {
+		pinger, err := ping.NewPinger(target)
+		if err != nil {
+			log.Println("Erro a enviar ping a vizinho:", err)
+			updateNeighbour(target, 0, 0, 0)
+			continue
+		}
+		pinger.SetPrivileged(true)
+		pinger.Count = 10 // pacotes a serem enviados
+		pinger.Timeout = 5 * time.Second
 
-			err := encoder.Encode(startSignal)
-			if err != nil {
-				log.Println("Erro a enviar porta:", err)
-				return
-			}
-			log.Println("Enviei porta destino a ", clientAddr)
-
-			// espera que o cliente avise que está pronto
-			decoder := gob.NewDecoder(client)
-			var ready packet
-			err = decoder.Decode(&ready)
-
-			distributeData(client, encoder, receivedPkt.Payload.Sender, port, dataChannel)
-			streamViewers[filePath] -= 1
-			log.Printf("Cliente %s desconectou-se da stream %s", receivedPkt.Payload.Sender, filePath)
-			if streamViewers[filePath] == 0 {
-				log.Printf("Stream %s sem viewers, fechando transmissão...", filePath)
-				close(dataChannel)
-				delete(fileStreamsAvailable, filePath)
-			}
-
+		pinger.OnRecv = func(pkt *ping.Packet) {
+			log.Printf("%d bytes from %s: icmp_seq=%d time=%v\n",
+				pkt.Nbytes, pkt.IPAddr, pkt.Seq, pkt.Rtt)
 		}
 
+		pinger.OnFinish = func(stats *ping.Statistics) {
+			log.Printf("\n--- %s ping statistics ---\n", target)
+			log.Printf("%d pacote enviados, %d pacotes recebidos, %.2f%% packet loss\n",
+				stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
+		}
+
+		fmt.Printf("Ping a %s com %d pacotes:\n", target, pinger.Count)
+		err = pinger.Run()
+		if err != nil {
+			log.Println("Erro a enviar ping a vizinho:", err)
+			updateNeighbour(target, 0, 0, 0)
+			continue
+		}
+		stats := pinger.Statistics()
+
+		flag := n.flag
+		rtt := stats.AvgRtt.Seconds() * 1000
+		loss := float64(stats.PacketLoss)
+		updateNeighbour(target, flag, rtt, loss)
+	}
+	updateFavNeighbour()
 }
-*/
+
+func updateNeighbour(ip string, flag int, rtt float64, loss float64) {
+	update := neighbour{
+		flag:    flag,
+		latency: rtt,
+		loss:    loss,
+	}
+	neighboursTable[ip] = update
+}
+
 func streamRequest(client net.Conn, receivedPkt packet) {
 	filePath := receivedPkt.Description
 	clientAddr := receivedPkt.Payload.Sender
@@ -290,7 +286,7 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 			client:  clientAddr,
 		}
 
-		log.Println("Stream já existe, redirecionando cliente")
+		color.Green("Stream já existe, redirecionando cliente")
 		streamViewers[filePath] += 1
 		fileStreamsAvailable[filePath] = append(fileStreamsAvailable[filePath], newStream)
 
@@ -312,7 +308,7 @@ func streamRequest(client net.Conn, receivedPkt packet) {
 			client:  clientAddr,
 		}
 		// se stream não existe faz request a vizinho
-		log.Println("Não tenho stream de ", filePath)
+		color.Green("Não tenho stream de " + filePath)
 		streamViewers[filePath] += 1
 		fileStreamsAvailable[filePath] = append(fileStreamsAvailable[filePath], newStream)
 		statusChannel := make(chan string)
@@ -369,7 +365,7 @@ func handshake(clientTCPConn net.Conn, clientAddr string, status string) (*net.U
 	log.Println("Enviei confirmação a ", clientAddr)
 
 	//abre porta de escrita para o cliente
-	println("enviando ao cliente UDP em", clientAddr)
+	color.Green("Enviando ao cliente em " + clientAddr)
 	redirAddr, err := net.ResolveUDPAddr("udp", clientAddr)
 	if err != nil {
 		log.Println(err)
@@ -396,7 +392,8 @@ func retransmit(clientUDPConn *net.UDPConn, filePath string, dataChannel chan []
 
 		_, err := clientUDPConn.Write(data)
 		if err != nil {
-			log.Println("CLIENTE FECHOU CONEXÃO", err)
+			color.Red("CLIENTE FECHOU CONEXÃO")
+			log.Println(err)
 			return
 		}
 
@@ -411,20 +408,30 @@ func source(filePath string) string {
 		ip = chooseSource(filePath)
 		return ip
 	} else {
-		flood()
-		try := 3
-		for {
-			ip, err := getFavNeighbour()
-			if err == nil {
-				return ip
-			} else if try == 0 {
-				return ""
-			} else {
-				time.Sleep(500 * time.Millisecond)
-				flood()
+		updateFavNeighbour()
+		ip, err := getFavNeighbour()
+		if err == nil {
+			return ip
+		} else {
+			flood()
+			updateFavNeighbour()
+			try := 3
+			for {
+				updateFavNeighbour()
+				ip, err := getFavNeighbour()
+				if err == nil {
+					return ip
+				} else if try == 0 {
+					return ""
+				} else {
+					time.Sleep(500 * time.Millisecond)
+					flood()
+					updateFavNeighbour()
+				}
+				try--
 			}
-			try--
 		}
+
 	}
 
 }
@@ -447,6 +454,7 @@ func getStream(clientConn net.Conn, filePath string, clientAddr string, statusCh
 		statusChannel <- "500"
 		return
 	}
+	color.Magenta("HERE" + ip)
 	// connect TCP (ip)
 	sourceConn, errCon := net.Dial("tcp", ip+":8081")
 	if errCon != nil {
@@ -497,21 +505,19 @@ func getStream(clientConn net.Conn, filePath string, clientAddr string, statusCh
 		src, err := net.ListenUDP("udp", srcAddr)
 		if err != nil {
 			log.Println(err)
+
 		}
 		defer src.Close()
 
 		// Buffer to store incoming data
 		buf := make([]byte, 2048)
-
 		// Continuously read data from the connection and redirect it
 		bufferCh := make([]byte, 2048)
 		for {
-
 			n, _, err := src.ReadFromUDP(buf)
 			if err != nil {
 				log.Println(err)
 			}
-
 			copy(bufferCh[:n], buf[:n])
 
 			for _, stream := range fileStreamsAvailable[filePath] {
@@ -519,7 +525,7 @@ func getStream(clientConn net.Conn, filePath string, clientAddr string, statusCh
 			}
 
 			if len(fileStreamsAvailable[filePath]) == 0 {
-				log.Println("No one's connected. Closing stream", filePath)
+				color.Cyan("No one's connected. Closing " + filePath + " stream...")
 				return
 			}
 			// cleaning the buffer
@@ -540,7 +546,7 @@ func chooseNeighbour(list []string) string {
 
 	for s, n := range neighboursTable {
 		if stringInArray(s, list) {
-			score := (pesoLatency * float64(n.latency)) + (pesoPacketLoss * float64(n.loss))
+			score := (pesoLatency * n.latency) + (pesoPacketLoss * n.loss)
 			// verificar score
 			if score < bestScore {
 				bestScore = score
@@ -550,6 +556,56 @@ func chooseNeighbour(list []string) string {
 	}
 
 	return bestNode
+}
+
+func updateFavNeighbour() {
+	pesoLatency := 0.8
+	pesoPacketLoss := 0.2
+
+	bestScore := 100000000000.0
+	var bestNode string
+
+	if len(neighboursTable) > 0 {
+		return
+	}
+
+	removeFav()
+
+	for s, n := range neighboursTable {
+		if n.flag == 2 || n.flag == 1 {
+			score := (pesoLatency * n.latency) + (pesoPacketLoss * n.loss / 100)
+			// verificar score
+			if score < bestScore {
+				bestScore = score
+				bestNode = s
+			}
+		}
+	}
+
+	setNewFav(bestNode)
+}
+
+func removeFav() {
+	for s, n := range neighboursTable {
+		if n.flag == 2 {
+			update := neighbour{
+				flag:    1,
+				latency: n.latency,
+				loss:    n.loss,
+			}
+			neighboursTable[s] = update
+		}
+	}
+}
+
+func setNewFav(ip string) {
+	n := neighboursTable[ip]
+	update := neighbour{
+		flag:    2,
+		latency: n.latency,
+		loss:    n.loss,
+	}
+	neighboursTable[ip] = update
 }
 
 // devolve melhor servidor para um ficheiro
@@ -588,14 +644,14 @@ func getServerFileList(serverAddr string, wg *sync.WaitGroup) {
 	// envia pedido ao servidor tipo 3
 	// recebe array
 	request := packet{
-		ReqType:     3,
+		ReqType:     2,
 		Description: "streams available",
 		Payload: payload{
 			Sender: nodeAddr,
 		},
 	}
 
-	sourceConn, errCon := net.DialTimeout("tcp", serverAddr+":8081", 2*time.Second)
+	sourceConn, errCon := net.DialTimeout("tcp", serverAddr+":8081", 5*time.Second)
 	if errCon != nil {
 		log.Println("Erro a estabelecer conexão com a source:", serverAddr, errCon)
 		return
@@ -620,7 +676,7 @@ func getServerFileList(serverAddr string, wg *sync.WaitGroup) {
 	serverTable[serverAddr] = availableFiles
 	update := neighbour{
 		flag:    4,
-		latency: int(rtt),
+		latency: float64(rtt.Milliseconds()),
 	}
 	if changeNeighbourMetric(update, serverAddr) {
 		neighboursTable[serverAddr] = update
@@ -634,8 +690,8 @@ func addNeighbours(info bootstrapper.NodeInfo) {
 	for _, n := range nodes {
 		neighboursTable[n] = neighbour{
 			flag:    0, //inicialmente sem ligação ao RP
-			latency: 0,
-			loss:    0,
+			latency: 0.0,
+			loss:    0.0,
 		}
 	}
 
@@ -644,8 +700,8 @@ func addNeighbours(info bootstrapper.NodeInfo) {
 		for _, n := range servers {
 			neighboursTable[n] = neighbour{
 				flag:    4, //indica que é servidor
-				latency: 0,
-				loss:    0,
+				latency: 0.0,
+				loss:    0.0,
 			}
 			serverTable[n] = []string{}
 		}
@@ -676,7 +732,12 @@ func floodRetransmit(receivedPkt payload) {
 	log.Println("[flood debug] Tempo total:", receivedPkt.TotalTime)
 	// recebe pacote se vier com TotalTime > 0 então envia para o ip no backtrace
 	if receivedPkt.TotalTime >= 0 {
-		saveFavNeighbour(receivedPkt)
+		flagVal := 1
+		if len(receivedPkt.AllNodes) == receivedPkt.BacktraceSize+2 {
+			flagVal = 3
+		}
+		updateNeighbour(ipNeighbour, flagVal, receivedPkt.TotalTime, 0)
+		updateFavNeighbour()
 		sendBack(receivedPkt)
 	} else {
 		a := receivedPkt.AllNodes
@@ -711,8 +772,8 @@ func saveFavNeighbour(pkt payload) {
 
 	n := neighbour{
 		flag:    flagVal,
-		latency: pkt.TotalTime,
-		loss:    0,
+		latency: float64(pkt.TotalTime),
+		loss:    0.0,
 	}
 	sender := pkt.Sender
 
@@ -748,7 +809,7 @@ func sendBack(pkt payload) {
 		ReqType: 0,
 		Payload: response,
 	}
-	timeout := 1 * time.Second
+	timeout := 5 * time.Second
 	neighbourConn, erro := net.DialTimeout("tcp", neighbourIp+":8081", timeout)
 	if erro != nil {
 		log.Println(erro)
@@ -781,14 +842,14 @@ func floodPivotPoint(receivedPkt payload) {
 	a = append(a, nodeAddr)
 
 	currentTime := time.Now()
-	duration := int(currentTime.Sub(receivedPkt.HourIn).Milliseconds())
+	duration := currentTime.Sub(receivedPkt.HourIn).Milliseconds()
 
 	response := payload{
 		Sender:        nodeAddr,
 		HourIn:        receivedPkt.HourIn,
 		AllNodes:      a,
 		BacktraceSize: receivedPkt.BacktraceSize,
-		TotalTime:     duration,
+		TotalTime:     float64(duration),
 	}
 
 	retransmitPkt := packet{
@@ -821,9 +882,7 @@ func sendToNeighbours(ipNeighbour string, pkt packet) {
 
 	for n := range neighboursTable {
 		if n != ipNeighbour {
-			println(n)
-			println(ipNeighbour)
-			timeoutDuration := 1 * time.Second
+			timeoutDuration := 5 * time.Second
 			neighbourConn, erro := net.DialTimeout("tcp", n+":8081", timeoutDuration)
 			if erro != nil {
 				log.Println(erro)
