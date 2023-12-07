@@ -454,7 +454,7 @@ func getStream(clientConn net.Conn, filePath string, clientAddr string, statusCh
 		statusChannel <- "500"
 		return
 	}
-	color.Magenta("HERE" + ip)
+
 	// connect TCP (ip)
 	sourceConn, errCon := net.Dial("tcp", ip+":8081")
 	if errCon != nil {
